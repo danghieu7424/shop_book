@@ -2,7 +2,7 @@ use axum::{
     extract::Request, // Chỉ cần Request cho middleware
     middleware::{ self, Next },
     response::{ Response },
-    routing::Router,
+    routing::{Router, get},
     http::{Method, HeaderValue, header},
 };
 use tower_http::{ cors::CorsLayer, services::{ ServeDir, ServeFile } };
@@ -160,6 +160,8 @@ async fn main() {
         .nest("/api/upload", upload::upload_routes())
         .nest("/api/cart", cart::cart_routes())
         .nest("/api/contact", contact::contact_routes())
+        // --- ROUTE MỚI: Lấy config payment (Public) ---
+        .route("/api/config", get(admin::get_payment_config))
 
         // Các route còn lại trong main
 

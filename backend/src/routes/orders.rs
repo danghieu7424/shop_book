@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Json, Path},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
     http::StatusCode,
     response::IntoResponse,
@@ -17,9 +17,24 @@ use rust_decimal::prelude::ToPrimitive;
 
 #[derive(Deserialize)]
 pub struct CreateOrderReq {
-    pub shipping_name: String,
-    pub shipping_phone: String,
-    pub shipping_address: String,
+    pub items: Option<Vec<ClientItem>>, 
+    pub shipping_info: ShippingInfo,
+    pub final_amount: Option<Decimal>,
+    pub payment_method: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ClientItem {
+    pub product_id: String,
+    pub quantity: i32,
+    pub price: Decimal,
+}
+
+#[derive(Deserialize)]
+pub struct ShippingInfo {
+    pub name: String,
+    pub phone: String,
+    pub address: String,
     pub note: Option<String>,
 }
 
@@ -28,6 +43,7 @@ pub struct OrderHistory {
     pub id: String,
     pub final_amount: Decimal,
     pub status: String,
+    pub payment_method: Option<String>,
     pub points_earned: i32,
     pub created_at: chrono::NaiveDateTime,
 }
@@ -51,7 +67,6 @@ async fn create_order(
 ) -> impl IntoResponse {
     let mut tx = state.db.begin().await.unwrap();
 
-    // 1. Lấy giỏ hàng
     let cart_items: Vec<(String, String, Decimal, i32)> = sqlx::query_as(
         "SELECT p.id, p.name, p.price, c.quantity 
          FROM cart_items c 
@@ -65,33 +80,31 @@ async fn create_order(
         return (StatusCode::BAD_REQUEST, Json("Giỏ hàng trống")).into_response();
     }
 
-    // 2. Tính tổng tiền
     let mut total_amount = Decimal::ZERO;
     for (_, _, price, qty) in &cart_items {
         total_amount += price * Decimal::from(*qty);
     }
 
-    // 3. Tạo ID đơn hàng
     let order_id = suid();
-    let points_earned = (total_amount.to_f64().unwrap_or(0.0) / 1000.0) as i32; // 1000đ = 1 điểm
+    let points_earned = (total_amount.to_f64().unwrap_or(0.0) / 1000.0) as i32;
+    let payment_method = payload.payment_method.unwrap_or("cod".to_string());
 
-    // 4. Insert Order
     let _ = sqlx::query(
-        "INSERT INTO orders (id, user_id, total_amount, final_amount, points_earned, status, shipping_name, shipping_phone, shipping_address, note)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)"
+        "INSERT INTO orders (id, user_id, total_amount, final_amount, points_earned, status, shipping_name, shipping_phone, shipping_address, note, payment_method)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)"
     )
     .bind(&order_id)
     .bind(&auth.user_id)
     .bind(total_amount)
-    .bind(total_amount) // Chưa tính giảm giá
+    .bind(total_amount)
     .bind(points_earned)
-    .bind(&payload.shipping_name)
-    .bind(&payload.shipping_phone)
-    .bind(&payload.shipping_address)
-    .bind(&payload.note)
+    .bind(&payload.shipping_info.name)
+    .bind(&payload.shipping_info.phone)
+    .bind(&payload.shipping_info.address)
+    .bind(&payload.shipping_info.note)
+    .bind(&payment_method)
     .execute(&mut *tx).await;
 
-    // 5. Insert Order Items & Trừ kho
     for (p_id, _, p_price, p_qty) in cart_items {
         let item_id = suid();
         let _ = sqlx::query(
@@ -100,13 +113,11 @@ async fn create_order(
         .bind(item_id).bind(&order_id).bind(&p_id).bind(p_qty).bind(p_price)
         .execute(&mut *tx).await;
 
-        // Trừ kho (Stock)
         let _ = sqlx::query("UPDATE products SET stock = stock - ? WHERE id = ?")
             .bind(p_qty).bind(p_id)
             .execute(&mut *tx).await;
     }
 
-    // 6. Xóa giỏ hàng
     let _ = sqlx::query("DELETE FROM cart_items WHERE user_id = ?")
         .bind(&auth.user_id)
         .execute(&mut *tx).await;
@@ -118,10 +129,11 @@ async fn create_order(
     }
 }
 
-// 2. Lịch sử đơn hàng của tôi
+// 2. Lịch sử đơn hàng
 async fn my_orders(State(state): State<AppState>, auth: AuthUser) -> impl IntoResponse {
     let orders = sqlx::query_as::<_, OrderHistory>(
-        "SELECT id, final_amount, status, points_earned, created_at FROM orders WHERE user_id = ? ORDER BY created_at DESC"
+        "SELECT id, final_amount, status, points_earned, created_at, payment_method 
+         FROM orders WHERE user_id = ? ORDER BY created_at DESC"
     )
     .bind(auth.user_id)
     .fetch_all(&state.db)
@@ -139,7 +151,6 @@ async fn order_detail(
     auth: AuthUser,
     Path(order_id): Path<String>
 ) -> impl IntoResponse {
-    // Kiểm tra quyền sở hữu đơn hàng
     let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM orders WHERE id = ? AND user_id = ?")
         .bind(&order_id).bind(&auth.user_id)
         .fetch_optional(&state.db).await.unwrap_or(None);
@@ -165,8 +176,91 @@ async fn order_detail(
     }
 }
 
+// 4. Xác nhận nhận hàng
+async fn receive_order(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(order_id): Path<String>
+) -> impl IntoResponse {
+    let mut tx = state.db.begin().await.unwrap();
+
+    let order: Option<(String, i32, String)> = sqlx::query_as(
+        "SELECT status, points_earned, payment_method FROM orders WHERE id = ? AND user_id = ?"
+    )
+    .bind(&order_id).bind(&auth.user_id)
+    .fetch_optional(&mut *tx).await.unwrap_or(None);
+
+    if let Some((status, points, payment_method)) = order {
+        if payment_method == "cod" {
+             return (StatusCode::BAD_REQUEST, Json("Đơn hàng COD cần Admin xác nhận thanh toán")).into_response();
+        }
+
+        if status == "shipping" {
+            let _ = sqlx::query("UPDATE orders SET status = 'completed' WHERE id = ?")
+                .bind(&order_id)
+                .execute(&mut *tx).await;
+            
+            let _ = sqlx::query("UPDATE users SET points = points + ? WHERE id = ?")
+                .bind(points).bind(&auth.user_id)
+                .execute(&mut *tx).await;
+            
+            if tx.commit().await.is_ok() {
+                return (StatusCode::OK, Json("Xác nhận thành công")).into_response();
+            }
+        }
+    }
+    (StatusCode::NOT_FOUND, Json("Không tìm thấy đơn hàng")).into_response()
+}
+
+// 5. Hủy đơn hàng (MỚI)
+async fn cancel_order(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(order_id): Path<String>
+) -> impl IntoResponse {
+    let mut tx = state.db.begin().await.unwrap();
+
+    // Kiểm tra quyền sở hữu và trạng thái
+    let order: Option<(String,)> = sqlx::query_as(
+        "SELECT status FROM orders WHERE id = ? AND user_id = ?"
+    )
+    .bind(&order_id).bind(&auth.user_id)
+    .fetch_optional(&mut *tx).await.unwrap_or(None);
+
+    if let Some((status,)) = order {
+        if status == "pending" {
+            // 1. Hoàn lại tồn kho cho sản phẩm
+            let items: Vec<(String, i32)> = sqlx::query_as(
+                "SELECT product_id, quantity FROM order_items WHERE order_id = ?"
+            )
+            .bind(&order_id)
+            .fetch_all(&mut *tx).await.unwrap_or(vec![]);
+
+            for (prod_id, qty) in items {
+                let _ = sqlx::query("UPDATE products SET stock = stock + ? WHERE id = ?")
+                    .bind(qty).bind(prod_id)
+                    .execute(&mut *tx).await;
+            }
+
+            // 2. Cập nhật trạng thái đơn hàng
+            let _ = sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = ?")
+                .bind(&order_id)
+                .execute(&mut *tx).await;
+
+            if tx.commit().await.is_ok() {
+                return (StatusCode::OK, Json("Đã hủy đơn hàng")).into_response();
+            }
+        } else {
+            return (StatusCode::BAD_REQUEST, Json("Chỉ có thể hủy đơn đang chờ duyệt")).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, Json("Không tìm thấy đơn hàng")).into_response()
+}
+
 pub fn order_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(create_order).get(my_orders))
         .route("/:id", get(order_detail))
+        .route("/:id/receive", put(receive_order))
+        .route("/:id/cancel", put(cancel_order)) // Route hủy đơn
 }

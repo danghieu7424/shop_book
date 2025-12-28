@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Plus, User } from "lucide-react"; // Thêm icon User
+import { Search, Plus, User } from "lucide-react";
 import { useStore, actions } from "../store";
 import { Button, Card } from "../components/UI";
 import { formatCurrency } from "../utils";
@@ -30,8 +30,9 @@ export default function ProductList() {
   }, [domain, dispatch]);
 
   const handleQuickAdd = async (product, e) => {
-    e.stopPropagation(); 
+    e.stopPropagation(); // Ngăn sự kiện click lan ra Card (tránh chuyển trang khi bấm nút +)
     dispatch(actions.add_to_cart(product));
+    
     if (userInfo) {
       const existingItem = cart.find((i) => i.id === product.id);
       const newQty = (existingItem ? existingItem.quantity : 0) + 1;
@@ -46,23 +47,24 @@ export default function ProductList() {
     }
   };
 
-  const filtered = products.filter(
+  // Lọc sản phẩm an toàn
+  const filtered = Array.isArray(products) ? products.filter(
     (p) =>
       (filterCat === "all" || p.category_id === filterCat) &&
       (p.name.toLowerCase().includes(search.toLowerCase()) || 
-       (p.author && p.author.toLowerCase().includes(search.toLowerCase()))) // Tìm kiếm cả theo tác giả
-  );
+       (p.author && p.author.toLowerCase().includes(search.toLowerCase())))
+  ) : [];
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex flex-col md:flex-row gap-8">
         {/* Sidebar Danh mục */}
         <div className="w-full md:w-64 space-y-4">
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-bold mb-4 text-gray-800">Khoa / Bộ môn</h3>
+          <div className="bg-white p-4 rounded-lg border shadow-sm">
+            <h3 className="font-bold mb-4 text-gray-800 flex items-center gap-2">📂 Khoa / Bộ môn</h3>
             <div
               onClick={() => setSearchParams({ cat: "all" })}
-              className={`cursor-pointer p-2 rounded mb-1 ${
+              className={`cursor-pointer p-2 rounded mb-1 transition-colors ${
                 filterCat === "all"
                   ? "bg-emerald-50 text-emerald-700 font-bold"
                   : "hover:bg-gray-50 text-gray-600"
@@ -74,7 +76,7 @@ export default function ProductList() {
               <div
                 key={c.id}
                 onClick={() => setSearchParams({ cat: c.id })}
-                className={`cursor-pointer p-2 rounded mb-1 ${
+                className={`cursor-pointer p-2 rounded mb-1 transition-colors ${
                   filterCat === c.id
                     ? "bg-emerald-50 text-emerald-700 font-bold"
                     : "hover:bg-gray-50 text-gray-600"
@@ -92,7 +94,7 @@ export default function ProductList() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
               <input
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 ring-emerald-500 outline-none"
+                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 ring-emerald-500 outline-none shadow-sm"
                 placeholder="Tìm tên giáo trình, tên tác giả..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -101,7 +103,7 @@ export default function ProductList() {
           </div>
 
           {filtered.length === 0 ? (
-            <div className="text-center py-10 text-gray-500">
+            <div className="text-center py-20 bg-white border border-dashed rounded-xl text-gray-500">
               Không tìm thấy giáo trình nào phù hợp.
             </div>
           ) : (
@@ -109,13 +111,12 @@ export default function ProductList() {
               {filtered.map((p) => (
                 <Card
                   key={p.id}
-                  className="flex flex-col h-full hover:shadow-lg transition-shadow group"
+                  // SỬA LỖI: Thêm onClick vào Card để bấm đâu cũng vào chi tiết
+                  onClick={() => navigate(`/product/${p.id}`)}
+                  className="flex flex-col h-full hover:shadow-lg transition-shadow group cursor-pointer border-emerald-100/50"
                 >
-                  {/* Ảnh bìa sách (Tỉ lệ dọc) */}
-                  <div
-                    className="aspect-[3/4] bg-gray-100 relative cursor-pointer overflow-hidden rounded-t-lg"
-                    onClick={() => navigate(`/product/${p.id}`)}
-                  >
+                  {/* Ảnh bìa sách */}
+                  <div className="aspect-[3/4] bg-gray-100 relative overflow-hidden rounded-t-lg">
                     <img
                       src={
                         p.image || (p.images && p.images[0])
@@ -126,18 +127,16 @@ export default function ProductList() {
                       alt={p.name}
                     />
                   </div>
+                  
                   <div className="p-4 flex flex-col flex-1">
                     <div className="text-xs text-emerald-600 font-semibold mb-1 uppercase tracking-wide">
                       {categories.find((c) => c.id === p.category_id)?.name || "Giáo trình"}
                     </div>
-                    <h3
-                      className="font-bold text-gray-800 mb-1 line-clamp-2 hover:text-emerald-700 cursor-pointer min-h-[3rem]"
-                      onClick={() => navigate(`/product/${p.id}`)}
-                    >
+                    
+                    <h3 className="font-bold text-gray-800 mb-1 line-clamp-2 min-h-[3rem] group-hover:text-emerald-700 transition-colors">
                       {p.name}
                     </h3>
                     
-                    {/* Hiển thị Tác giả */}
                     {p.author && (
                         <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
                             <User size={12}/> {p.author}
@@ -149,6 +148,7 @@ export default function ProductList() {
                         {formatCurrency(p.price)}
                       </span>
                       <Button
+                        // Button thêm nhanh (đã có stopPropagation ở hàm handleQuickAdd)
                         onClick={(e) => handleQuickAdd(p, e)}
                         className="!p-2 rounded-full w-10 h-10 flex items-center justify-center shadow-sm hover:shadow-md transition-all active:scale-90 bg-emerald-600 hover:bg-emerald-700 border-none text-white"
                       >

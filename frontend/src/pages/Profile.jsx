@@ -1,167 +1,256 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Plus, User } from "lucide-react"; // Thêm icon User
+import React, { useState, useEffect, useMemo } from "react";
 import { useStore, actions } from "../store";
-import { Button, Card } from "../components/UI";
-import { formatCurrency } from "../utils";
+import { Card, Badge, Button } from "../components/UI";
+import { formatCurrency, LEVELS } from "../utils";
+import {
+  X,
+  QrCode,
+  CheckCircle,
+  Crown,
+  ShoppingCart,
+  User,
+  Save,
+  Phone,
+  MapPin,
+  LogOut,
+  Wallet,
+  Ban // Icon cấm/hủy
+} from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-export default function ProductList() {
+export default function Profile() {
   const [state, dispatch] = useStore();
-  const { products, categories, domain, userInfo, cart } = state; 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { userInfo, domain } = state;
   const navigate = useNavigate();
+  
+  const [orders, setOrders] = useState([]); 
+  const [qrData, setQrData] = useState(null);
+  const [paymentConfig, setPaymentConfig] = useState(null);
 
-  const filterCat = searchParams.get("cat") || "all";
-  const [search, setSearch] = useState("");
+  // Đã bỏ studentId
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const prodRes = await fetch(`${domain}/api/products`);
-        if (prodRes.ok) dispatch(actions.set_products(await prodRes.json()));
-
-        const catRes = await fetch(`${domain}/api/categories`);
-        if (catRes.ok) dispatch(actions.set_categories(await catRes.json()));
-      } catch (e) {
-        console.error("Lỗi tải dữ liệu:", e);
-      }
-    };
-    loadData();
-  }, [domain, dispatch]);
-
-  const handleQuickAdd = async (product, e) => {
-    e.stopPropagation(); 
-    dispatch(actions.add_to_cart(product));
+  const fetchOrders = () => {
     if (userInfo) {
-      const existingItem = cart.find((i) => i.id === product.id);
-      const newQty = (existingItem ? existingItem.quantity : 0) + 1;
-      try {
-        await fetch(`${domain}/api/cart`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ product_id: product.id, quantity: newQty }),
-          credentials: "include",
+      fetch(`${domain}/api/orders`, { credentials: "include" })
+        .then((res) => {
+            if (res.status === 401 || res.status === 403) {
+                dispatch(actions.set_user_info(null));
+                dispatch(actions.clear_cart());
+                navigate('/login');
+                throw new Error("Phiên đăng nhập hết hạn");
+            }
+            if (res.ok) return res.json();
+            throw new Error("Không thể tải đơn hàng"); 
+        })
+        .then((data) => {
+            if (Array.isArray(data)) setOrders(data);
+            else setOrders([]);
+        })
+        .catch((err) => {
+            console.error("Lỗi fetch orders:", err);
+            setOrders([]); 
         });
-      } catch (err) { console.error("Lỗi đồng bộ giỏ hàng:", err); }
     }
   };
 
-  const filtered = products.filter(
-    (p) =>
-      (filterCat === "all" || p.category_id === filterCat) &&
-      (p.name.toLowerCase().includes(search.toLowerCase()) || 
-       (p.author && p.author.toLowerCase().includes(search.toLowerCase()))) // Tìm kiếm cả theo tác giả
-  );
+  useEffect(() => {
+    fetchOrders();
+    if (userInfo) {
+        setPhone(userInfo.phone || "");
+        setAddress(userInfo.address || "");
+    }
+    fetch(`${domain}/api/config`).then(res => res.ok ? res.json() : null).then(data => { if(data) setPaymentConfig(data); }).catch(console.error);
+  }, [userInfo, domain]);
+
+  const handleUpdateProfile = async () => {
+    try {
+        const res = await fetch(`${domain}/api/auth/me`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ phone: phone, address: address }), // Bỏ gửi student_id
+            credentials: 'include'
+        });
+        if (res.ok) {
+            alert("Cập nhật thông tin thành công!");
+            setIsEditing(false);
+        } else {
+            alert("Lỗi cập nhật");
+        }
+    } catch (e) { console.error(e); }
+  };
+
+  // --- LOGIC HỦY ĐƠN MỚI ---
+  const handleCancelOrder = async (orderId) => {
+      if(!window.confirm("Bạn chắc chắn muốn hủy đơn hàng này?")) return;
+      try {
+          const res = await fetch(`${domain}/api/orders/${orderId}/cancel`, {
+              method: "PUT",
+              credentials: "include"
+          });
+          if(res.ok) {
+              alert("Đã hủy đơn hàng thành công!");
+              fetchOrders(); // Tải lại danh sách
+          } else {
+              const err = await res.json();
+              alert("Lỗi: " + (err || "Không thể hủy đơn"));
+          }
+      } catch(e) { alert("Lỗi kết nối server"); }
+  };
+
+  const loyaltyStatus = useMemo(() => {
+    if (!userInfo) return null;
+    const currentPoints = userInfo.points || 0;
+    const sortedLevels = Object.values(LEVELS).sort((a, b) => a.min - b.min);
+    const nextLevelIndex = sortedLevels.findIndex((lvl) => lvl.min > currentPoints);
+    let nextLevel = null, progress = 100, pointsNeeded = 0;
+    if (nextLevelIndex !== -1) {
+      nextLevel = sortedLevels[nextLevelIndex];
+      const currentLevelMin = sortedLevels[nextLevelIndex - 1]?.min || 0;
+      const range = nextLevel.min - currentLevelMin;
+      progress = Math.min(100, Math.max(0, ((currentPoints - currentLevelMin) / range) * 100));
+      pointsNeeded = nextLevel.min - currentPoints;
+    }
+    return { progress, nextLevel, pointsNeeded };
+  }, [userInfo]);
+
+  const handleReceived = async (orderId) => {
+    if (!window.confirm("Bạn xác nhận đã nhận được sách?")) return;
+    try {
+      const res = await fetch(`${domain}/api/orders/${orderId}/receive`, { method: "PUT", credentials: "include" });
+      if (res.ok) {
+        alert("Xác nhận thành công! Điểm thưởng đã được cộng.");
+        fetchOrders();
+      } else {
+          const err = await res.json();
+          alert("Lỗi: " + (err || "Không thể xác nhận"));
+      }
+    } catch (e) { alert("Lỗi kết nối"); }
+  };
+
+  const getDynamicQR = (amount, content) => {
+      const BANK_ID = paymentConfig?.bank_bin || "970422";
+      const ACCOUNT_NO = paymentConfig?.bank_number || "0333666999"; 
+      const ACCOUNT_NAME = paymentConfig?.bank_name || "NGUYEN VAN A";
+      const TEMPLATE = paymentConfig?.bank_template || "compact2";
+      return `https://img.vietqr.io/image/${BANK_ID}-${ACCOUNT_NO}-${TEMPLATE}.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(ACCOUNT_NAME)}`;
+  };
+
+  if (!userInfo) return <div className="p-20 text-center"><Button onClick={() => navigate('/login')}>Đăng nhập lại</Button></div>;
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="flex flex-col md:flex-row gap-8">
-        {/* Sidebar Danh mục */}
-        <div className="w-full md:w-64 space-y-4">
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-bold mb-4 text-gray-800">Khoa / Bộ môn</h3>
-            <div
-              onClick={() => setSearchParams({ cat: "all" })}
-              className={`cursor-pointer p-2 rounded mb-1 ${
-                filterCat === "all"
-                  ? "bg-emerald-50 text-emerald-700 font-bold"
-                  : "hover:bg-gray-50 text-gray-600"
-              }`}
-            >
-              Tất cả
-            </div>
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                onClick={() => setSearchParams({ cat: c.id })}
-                className={`cursor-pointer p-2 rounded mb-1 ${
-                  filterCat === c.id
-                    ? "bg-emerald-50 text-emerald-700 font-bold"
-                    : "hover:bg-gray-50 text-gray-600"
-                }`}
-              >
-                {c.name}
-              </div>
-            ))}
+      <div className="grid md:grid-cols-3 gap-8">
+        {/* CỘT TRÁI (Giữ nguyên, đã bỏ student ID input) */}
+        <div className="space-y-6">
+          <Card className="p-0 overflow-hidden border-none shadow-lg">
+             <div className="h-24 bg-gradient-to-r from-emerald-600 to-emerald-400"></div>
+             <div className="px-6 pb-6 relative">
+                 <div className="flex justify-center mt-[-48px]">
+                    <img src={userInfo.picture || "https://via.placeholder.com/100"} className="w-24 h-24 rounded-full border-4 border-white shadow-md object-cover bg-white" alt="avatar" />
+                 </div>
+                  <div className="mt-16 text-center">
+                    <h2 className="font-bold text-xl text-gray-800">{userInfo.name}</h2>
+                    <div className="text-sm text-gray-500 mb-2">{userInfo.email}</div>
+                    <Badge color="blue">{LEVELS[userInfo.level]?.name || userInfo.level} Reader</Badge>
+                  </div>
+             </div>
+             <div className="px-6 pb-6 pt-2 border-t space-y-3">
+                 <div className="flex justify-between items-center mb-2"><h3 className="font-bold text-gray-700">Thông tin cá nhân</h3>{!isEditing && <button onClick={() => setIsEditing(true)} className="text-xs text-blue-600 hover:underline">Sửa đổi</button>}</div>
+                 
+                 {/* ĐÃ BỎ INPUT MÃ SINH VIÊN TẠI ĐÂY */}
+
+                 <div><label className="text-xs text-gray-500 block">Số điện thoại</label>{isEditing ? <input className="w-full border rounded p-1 text-sm mt-1" value={phone} onChange={e=>setPhone(e.target.value)} /> : <div className="font-medium text-gray-800">{userInfo.phone || <span className="text-gray-400 italic">Chưa cập nhật</span>}</div>}</div>
+                 <div><label className="text-xs text-gray-500 block">Địa chỉ nhận sách</label>{isEditing ? <textarea className="w-full border rounded p-1 text-sm mt-1" rows="2" value={address} onChange={e=>setAddress(e.target.value)} /> : <div className="font-medium text-gray-800 text-sm">{userInfo.address || <span className="text-gray-400 italic">Chưa cập nhật</span>}</div>}</div>
+                 {isEditing && <div className="flex gap-2 mt-2"><Button size="sm" onClick={handleUpdateProfile} className="w-full bg-emerald-600 border-none text-white"><Save size={14} className="mr-1"/> Lưu</Button><Button size="sm" variant="secondary" onClick={() => setIsEditing(false)} className="w-full">Hủy</Button></div>}
+             </div>
+          </Card>
+          
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="flex justify-between items-end mb-4"><div><div className="text-gray-500 text-sm font-medium flex items-center gap-1"><Crown size={16} className="text-yellow-500" /> Điểm tích lũy</div><div className="text-4xl font-extrabold text-emerald-700 mt-1">{userInfo.points} <span className="text-sm font-normal text-gray-400">pts</span></div></div></div>
+             {loyaltyStatus && loyaltyStatus.nextLevel && (<div><div className="w-full bg-gray-100 rounded-full h-2.5 mb-2 overflow-hidden"><div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-2.5 rounded-full" style={{ width: `${loyaltyStatus.progress}%` }}></div></div><div className="text-xs text-gray-500 text-center">Cần thêm <b>{loyaltyStatus.pointsNeeded}</b> pts để lên hạng <b>{loyaltyStatus.nextLevel.name}</b></div></div>)}
           </div>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1">
-          <div className="flex gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-              <input
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 ring-emerald-500 outline-none"
-                placeholder="Tìm tên giáo trình, tên tác giả..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+        {/* CỘT PHẢI: LỊCH SỬ ĐƠN SÁCH */}
+        <div className="md:col-span-2">
+          <h2 className="font-bold text-xl mb-4 flex items-center gap-2 text-gray-800">
+            Lịch sử đăng ký sách <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{orders.length}</span>
+          </h2>
+          <div className="space-y-4">
+            {Array.isArray(orders) && orders.map((o) => (
+              <Card key={o.id} className="p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-md transition-shadow">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="font-bold text-lg text-gray-800">Đơn #{o.id.substring(0, 8)}</div>
+                    <Badge color={o.status === "completed" ? "green" : o.status === "shipping" ? "blue" : o.status === "cancelled" ? "red" : "yellow"}>
+                      {o.status === "completed" ? "Hoàn thành" : o.status === "shipping" ? "Đang giao" : o.status === "pending" ? "Chờ duyệt" : "Đã hủy"}
+                    </Badge>
+                  </div>
+                  <div className="text-sm text-gray-500 flex items-center gap-2">
+                    {new Date(o.created_at).toLocaleDateString("vi-VN")}
+                    <span className="text-gray-300">|</span>
+                    {o.payment_method === 'cod' ? 
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium"><Wallet size={12}/> COD</span> : 
+                        <span className="flex items-center gap-1 text-blue-600 font-medium"><QrCode size={12}/> QR</span>
+                    }
+                  </div>
+                </div>
+                <div className="text-right flex flex-col items-end gap-2 w-full md:w-auto">
+                  <div className="font-bold text-red-600 text-lg">{formatCurrency(o.final_amount)}</div>
+                  
+                  {/* LOGIC NÚT BẤM CẬP NHẬT */}
+                  {o.status === "pending" && (
+                    <div className="flex gap-2">
+                        {/* Nút thanh toán QR (chỉ hiện nếu là QR) */}
+                        {o.payment_method === 'qr' && (
+                            <Button size="sm" className="bg-blue-50 text-blue-600 hover:bg-blue-100 border-none" onClick={() => setQrData({ amount: o.final_amount, content: `Thanh toan sach ${o.id}` })}>
+                                <QrCode size={16} className="mr-1"/> Thanh toán
+                            </Button>
+                        )}
+                        {/* Nút hủy đơn (Luôn hiện khi pending) */}
+                        <Button size="sm" variant="secondary" className="bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-600 border-none" onClick={() => handleCancelOrder(o.id)}>
+                            <Ban size={16} className="mr-1"/> Hủy đơn
+                        </Button>
+                    </div>
+                  )}
+
+                  {o.status === "shipping" && (
+                    o.payment_method === 'qr' ? (
+                        <Button size="sm" onClick={() => handleReceived(o.id)} className="bg-emerald-600 hover:bg-emerald-700 border-none text-white">
+                            <CheckCircle size={16} className="mr-1"/> Đã nhận sách
+                        </Button>
+                    ) : (
+                        <span className="text-sm text-orange-600 font-medium bg-orange-50 px-3 py-1 rounded border border-orange-100">
+                            Shipper đang giao & thu tiền
+                        </span>
+                    )
+                  )}
+                </div>
+              </Card>
+            ))}
+            {orders.length === 0 && (
+                <div className="text-center py-10 bg-gray-50 rounded-lg border border-dashed text-gray-500">Bạn chưa đăng ký mua cuốn sách nào.</div>
+            )}
           </div>
-
-          {filtered.length === 0 ? (
-            <div className="text-center py-10 text-gray-500">
-              Không tìm thấy giáo trình nào phù hợp.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
-              {filtered.map((p) => (
-                <Card
-                  key={p.id}
-                  className="flex flex-col h-full hover:shadow-lg transition-shadow group"
-                >
-                  {/* Ảnh bìa sách (Tỉ lệ dọc) */}
-                  <div
-                    className="aspect-[3/4] bg-gray-100 relative cursor-pointer overflow-hidden rounded-t-lg"
-                    onClick={() => navigate(`/product/${p.id}`)}
-                  >
-                    <img
-                      src={
-                        p.image || (p.images && p.images[0])
-                          ? `${domain}${p.image || p.images[0]}`
-                          : "https://placehold.co/300x400?text=No+Cover"
-                      }
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      alt={p.name}
-                    />
-                  </div>
-                  <div className="p-4 flex flex-col flex-1">
-                    <div className="text-xs text-emerald-600 font-semibold mb-1 uppercase tracking-wide">
-                      {categories.find((c) => c.id === p.category_id)?.name || "Giáo trình"}
-                    </div>
-                    <h3
-                      className="font-bold text-gray-800 mb-1 line-clamp-2 hover:text-emerald-700 cursor-pointer min-h-[3rem]"
-                      onClick={() => navigate(`/product/${p.id}`)}
-                    >
-                      {p.name}
-                    </h3>
-                    
-                    {/* Hiển thị Tác giả */}
-                    {p.author && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
-                            <User size={12}/> {p.author}
-                        </div>
-                    )}
-
-                    <div className="mt-auto flex justify-between items-center pt-2 border-t border-dashed">
-                      <span className="text-lg font-bold text-red-600">
-                        {formatCurrency(p.price)}
-                      </span>
-                      <Button
-                        onClick={(e) => handleQuickAdd(p, e)}
-                        className="!p-2 rounded-full w-10 h-10 flex items-center justify-center shadow-sm hover:shadow-md transition-all active:scale-90 bg-emerald-600 hover:bg-emerald-700 border-none text-white"
-                      >
-                        <Plus size={20} />
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Modal QR Code */}
+      {qrData && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setQrData(null)}>
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setQrData(null)} className="absolute top-4 right-4 text-gray-400"><X size={24} /></button>
+            <h3 className="text-xl font-bold text-center mb-6">Thanh toán VietQR</h3>
+            <img src={getDynamicQR(qrData.amount, qrData.content)} className="w-full rounded-lg mb-4 border" alt="QR Code" />
+            <div className="text-center font-bold text-blue-600 text-2xl">{formatCurrency(qrData.amount)}</div>
+            <p className="text-center text-xs text-gray-500 mt-2 bg-gray-100 p-2 rounded">{qrData.content}</p>
+            <div className="text-center text-xs text-gray-400 mt-1">{paymentConfig?.bank_name} - {paymentConfig?.bank_number}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

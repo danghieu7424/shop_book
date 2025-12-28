@@ -21,23 +21,23 @@ import {
   BarChart2,
   Settings,
   MessageSquare,
-  Mail
+  Mail,
+  Loader2,
+  CreditCard // <-- Thêm icon thẻ
 } from "lucide-react";
 import { useStore, actions } from "../store";
 import { Button, Card, Badge } from "../components/UI";
 import { formatCurrency } from "../utils";
 
-// --- 1. COMPONENT UPLOAD ẢNH ---
+// --- 1. COMPONENT UPLOAD ẢNH (Giữ nguyên) ---
 const ImageUploader = ({ images = [], onImagesChange, domain }) => {
   const [uploading, setUploading] = useState(false);
-
   const onDrop = useCallback(
     async (acceptedFiles) => {
       if (acceptedFiles.length === 0) return;
       setUploading(true);
       const formData = new FormData();
       acceptedFiles.forEach((file) => formData.append("files", file));
-
       try {
         const res = await fetch(`${domain}/api/upload`, {
           method: "POST",
@@ -54,13 +54,11 @@ const ImageUploader = ({ images = [], onImagesChange, domain }) => {
     },
     [images, domain, onImagesChange]
   );
-
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { "image/*": [] },
     multiple: true,
   });
-
   return (
     <div className="space-y-3">
       <label className="block text-sm font-semibold text-gray-700">
@@ -76,15 +74,18 @@ const ImageUploader = ({ images = [], onImagesChange, domain }) => {
       >
         <input {...getInputProps()} />
         <div className="flex flex-col items-center gap-2 text-gray-500">
-          <UploadCloud size={32} className="text-emerald-500" />
           {uploading ? (
-            <span className="animate-pulse">Đang tải lên...</span>
+            <Loader2 size={32} className="text-emerald-500 animate-spin" />
+          ) : (
+            <UploadCloud size={32} className="text-emerald-500" />
+          )}
+          {uploading ? (
+            <span className="animate-pulse text-sm">Đang tải lên...</span>
           ) : (
             <span className="text-sm">Kéo thả ảnh vào đây</span>
           )}
         </div>
       </div>
-
       {images.length > 0 && (
         <div className="grid grid-cols-4 gap-3 mt-3">
           {images.map((link, idx) => (
@@ -102,7 +103,8 @@ const ImageUploader = ({ images = [], onImagesChange, domain }) => {
                   e.stopPropagation();
                   onImagesChange(images.filter((_, i) => i !== idx));
                 }}
-                className="absolute top-1 right-1 bg-white text-red-600 p-1 rounded-full shadow-sm"
+                className="absolute top-1 right-1 bg-white text-red-600 p-1 rounded-full shadow-sm hover:bg-red-50"
+                type="button"
               >
                 <X size={14} />
               </button>
@@ -120,7 +122,9 @@ export default function Admin() {
   const { userInfo, domain, categories } = state;
   const [activeTab, setActiveTab] = useState("products");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Data States
   const [products, setProducts] = useState([]);
@@ -146,13 +150,11 @@ export default function Admin() {
     specs: [],
   });
 
-  // Form thêm Danh mục
   const [catName, setCatName] = useState("");
 
   const fetchData = async (tab = activeTab) => {
     setLoading(true);
     try {
-      // Luôn load danh mục và sản phẩm nền
       const [prodRes, catRes] = await Promise.all([
         fetch(`${domain}/api/products`),
         fetch(`${domain}/api/categories`),
@@ -192,9 +194,9 @@ export default function Admin() {
     if (userInfo?.role === "admin") fetchData();
   }, [activeTab, userInfo, domain]);
 
-  // --- LOGIC DANH MỤC ---
   const handleAddCategory = async () => {
     if (!catName) return alert("Nhập tên danh mục!");
+    setSubmitting(true);
     try {
       const res = await fetch(`${domain}/api/admin/categories`, {
         method: "POST",
@@ -209,11 +211,14 @@ export default function Admin() {
       } else alert("Lỗi thêm danh mục");
     } catch (e) {
       alert("Lỗi server");
+    } finally {
+        setSubmitting(false);
     }
   };
 
   const handleDeleteCategory = async (id) => {
     if (!confirm("Bạn chắc chắn muốn xóa?")) return;
+    setSubmitting(true);
     try {
       const res = await fetch(`${domain}/api/admin/categories/${id}`, {
         method: "DELETE",
@@ -222,17 +227,22 @@ export default function Admin() {
       if (res.ok) {
         alert("Đã xóa!");
         fetchData();
-      } else alert("Không thể xóa (có thể danh mục đang chứa sách)");
+      } else {
+          const err = await res.json();
+          alert("Không thể xóa: " + (err || "Lỗi server"));
+      }
     } catch (e) {
       alert("Lỗi server");
+    } finally {
+        setSubmitting(false);
     }
   };
 
-  // --- LOGIC SÁCH ---
   const saveProduct = async () => {
     if (!prodForm.name || !prodForm.category_id)
       return alert("Vui lòng nhập tên và chọn danh mục!");
 
+    setSubmitting(true);
     const specsObject = prodForm.specs.reduce((acc, curr) => {
       if (curr.key) acc[curr.key] = curr.value;
       return acc;
@@ -264,6 +274,9 @@ export default function Admin() {
       } else alert("Lỗi lưu sách");
     } catch (e) {
       console.error(e);
+      alert("Lỗi kết nối");
+    } finally {
+        setSubmitting(false);
     }
   };
 
@@ -275,11 +288,7 @@ export default function Admin() {
       setProdForm({
         ...p,
         specs,
-        images: Array.isArray(p.images)
-          ? p.images
-          : p.image
-          ? [p.image]
-          : [],
+        images: Array.isArray(p.images) ? p.images : p.image ? [p.image] : [],
         author: p.author || "",
         publisher: p.publisher || "",
         publication_year: p.publication_year || "",
@@ -304,25 +313,33 @@ export default function Admin() {
 
   const handleDeleteProduct = async (id) => {
     if (!confirm("Xóa sách này?")) return;
-    await fetch(`${domain}/api/admin/products/${id}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    fetchData();
+    setSubmitting(true);
+    try {
+        await fetch(`${domain}/api/admin/products/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+        });
+        fetchData();
+    } catch(e) { console.error(e); }
+    finally { setSubmitting(false); }
   };
 
-  // --- LOGIC KHÁC ---
   const updateOrderStatus = async (id, status) => {
-    await fetch(`${domain}/api/admin/orders/${id}/status`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-      credentials: "include",
-    });
-    fetchData("orders");
+    setSubmitting(true);
+    try {
+        await fetch(`${domain}/api/admin/orders/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+        credentials: "include",
+        });
+        fetchData("orders");
+    } catch(e) { console.error(e); }
+    finally { setSubmitting(false); }
   };
 
   const saveSettings = async (newSettingsObj) => {
+    setSubmitting(true);
     const settingsArray = Object.entries(newSettingsObj).map(([id, value]) => ({ id, value }));
     try {
         await fetch(`${domain}/api/admin/settings`, {
@@ -333,19 +350,23 @@ export default function Admin() {
         });
         alert("Cập nhật thành công!");
     } catch(e) { alert("Lỗi cập nhật"); }
+    finally { setSubmitting(false); }
   };
 
   const updateContactStatus = async (id, status) => {
-      await fetch(`${domain}/api/admin/contacts/${id}/status`, {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ status }),
-          credentials: 'include'
-      });
-      fetchData("contacts");
+      setSubmitting(true);
+      try {
+        await fetch(`${domain}/api/admin/contacts/${id}/status`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ status }),
+            credentials: 'include'
+        });
+        fetchData("contacts");
+      } catch(e) { console.error(e); }
+      finally { setSubmitting(false); }
   };
 
-  // --- RENDER ---
   if (userInfo?.role !== "admin")
     return (
       <div className="p-10 text-center text-red-500 font-bold">
@@ -355,12 +376,17 @@ export default function Admin() {
 
   const renderContent = () => {
     if (loading)
-      return <div className="text-center p-10">Đang tải dữ liệu...</div>;
+      return (
+        <div className="flex flex-col h-64 items-center justify-center text-emerald-600">
+            <Loader2 size={40} className="animate-spin mb-2" />
+            <span>Đang tải dữ liệu...</span>
+        </div>
+      );
 
     switch (activeTab) {
       case "categories":
         return (
-          <div className="space-y-6 max-w-4xl">
+          <div className="space-y-6 max-w-4xl animate-fade-in">
             <h2 className="text-2xl font-bold text-gray-800">
               Quản lý Danh mục (Khoa/Bộ môn)
             </h2>
@@ -370,17 +396,19 @@ export default function Admin() {
                   Tên danh mục mới
                 </label>
                 <input
-                  className="border p-2 rounded w-full outline-none focus:border-emerald-500"
+                  className="border p-2 rounded w-full outline-none focus:border-emerald-500 disabled:bg-gray-100"
                   placeholder="VD: Công nghệ thông tin, Kinh tế..."
                   value={catName}
                   onChange={(e) => setCatName(e.target.value)}
+                  disabled={submitting}
                 />
               </div>
               <Button
                 onClick={handleAddCategory}
-                className="bg-emerald-600 text-white h-10"
+                className="bg-emerald-600 text-white h-10 w-32"
+                disabled={submitting}
               >
-                Thêm mới
+                {submitting ? <Loader2 className="animate-spin" size={20} /> : "Thêm mới"}
               </Button>
             </Card>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -392,7 +420,8 @@ export default function Admin() {
                   <span className="font-bold text-gray-700">{c.name}</span>
                   <button
                     onClick={() => handleDeleteCategory(c.id)}
-                    className="text-red-500 hover:bg-red-50 p-2 rounded"
+                    className="text-red-500 hover:bg-red-50 p-2 rounded disabled:opacity-50"
+                    disabled={submitting}
                   >
                     <Trash2 size={18} />
                   </button>
@@ -408,7 +437,8 @@ export default function Admin() {
             <div className="max-w-5xl mx-auto animate-fade-in">
               <button
                 onClick={() => setIsEditingProd(false)}
-                className="mb-4 text-gray-500 hover:text-emerald-600 flex items-center gap-1"
+                className="mb-4 text-gray-500 hover:text-emerald-600 flex items-center gap-1 disabled:opacity-50"
+                disabled={submitting}
               >
                 <ChevronRight className="rotate-180" size={20} /> Quay lại danh
                 sách
@@ -430,6 +460,7 @@ export default function Admin() {
                           setProdForm({ ...prodForm, name: e.target.value })
                         }
                         placeholder="VD: Giải tích 1"
+                        disabled={submitting}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -443,6 +474,7 @@ export default function Admin() {
                           onChange={(e) =>
                             setProdForm({ ...prodForm, author: e.target.value })
                           }
+                          disabled={submitting}
                         />
                       </div>
                       <div>
@@ -458,6 +490,7 @@ export default function Admin() {
                               publisher: e.target.value,
                             })
                           }
+                          disabled={submitting}
                         />
                       </div>
                     </div>
@@ -475,6 +508,7 @@ export default function Admin() {
                               category_id: e.target.value,
                             })
                           }
+                          disabled={submitting}
                         >
                           <option value="">-- Chọn danh mục --</option>
                           {categories.map((c) => (
@@ -498,6 +532,7 @@ export default function Admin() {
                               publication_year: e.target.value,
                             })
                           }
+                          disabled={submitting}
                         />
                       </div>
                     </div>
@@ -513,6 +548,7 @@ export default function Admin() {
                           onChange={(e) =>
                             setProdForm({ ...prodForm, price: e.target.value })
                           }
+                          disabled={submitting}
                         />
                       </div>
                       <div>
@@ -526,6 +562,7 @@ export default function Admin() {
                           onChange={(e) =>
                             setProdForm({ ...prodForm, stock: e.target.value })
                           }
+                          disabled={submitting}
                         />
                       </div>
                     </div>
@@ -543,6 +580,7 @@ export default function Admin() {
                             description: e.target.value,
                           })
                         }
+                        disabled={submitting}
                       />
                     </div>
                     <ImageUploader
@@ -553,7 +591,6 @@ export default function Admin() {
                       domain={domain}
                     />
                   </div>
-                  {/* Cột phải: Thông số */}
                   <div className="bg-gray-50 p-4 rounded h-fit border">
                     <div className="flex justify-between items-center mb-2">
                       <label className="font-bold">Thông tin khác</label>
@@ -567,7 +604,8 @@ export default function Admin() {
                             ],
                           })
                         }
-                        className="text-emerald-600 text-sm font-bold flex items-center"
+                        className="text-emerald-600 text-sm font-bold flex items-center disabled:opacity-50"
+                        disabled={submitting}
                       >
                         <Plus size={14} /> Thêm
                       </button>
@@ -587,6 +625,7 @@ export default function Admin() {
                               n[i].key = e.target.value;
                               setProdForm({ ...prodForm, specs: n });
                             }}
+                            disabled={submitting}
                           />
                           <input
                             className="w-1/2 text-xs outline-none"
@@ -597,6 +636,7 @@ export default function Admin() {
                               n[i].value = e.target.value;
                               setProdForm({ ...prodForm, specs: n });
                             }}
+                            disabled={submitting}
                           />
                           <button
                             onClick={() =>
@@ -607,7 +647,8 @@ export default function Admin() {
                                 ),
                               })
                             }
-                            className="text-red-500"
+                            className="text-red-500 disabled:opacity-50"
+                            disabled={submitting}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -620,21 +661,28 @@ export default function Admin() {
                   <Button
                     variant="secondary"
                     onClick={() => setIsEditingProd(false)}
+                    disabled={submitting}
                   >
                     Hủy
                   </Button>
                   <Button
                     onClick={saveProduct}
-                    className="bg-emerald-600 text-white"
+                    className="bg-emerald-600 text-white min-w-[120px]"
+                    disabled={submitting}
                   >
-                    Lưu sách
+                    {submitting ? (
+                        <>
+                            <Loader2 className="animate-spin mr-2" size={18} />
+                            Đang lưu...
+                        </>
+                    ) : "Lưu sách"}
                   </Button>
                 </div>
               </Card>
             </div>
           );
         return (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-gray-800">
                 Kho sách giáo trình
@@ -642,6 +690,7 @@ export default function Admin() {
               <Button
                 onClick={() => openEditProduct(null)}
                 className="bg-emerald-600 text-white"
+                disabled={submitting}
               >
                 <Plus size={18} className="mr-2" /> Nhập sách mới
               </Button>
@@ -693,13 +742,15 @@ export default function Admin() {
                       <td className="p-4 text-right space-x-2">
                         <button
                           onClick={() => openEditProduct(p)}
-                          className="text-blue-600 bg-blue-50 p-2 rounded hover:bg-blue-100"
+                          className="text-blue-600 bg-blue-50 p-2 rounded hover:bg-blue-100 disabled:opacity-50"
+                          disabled={submitting}
                         >
                           <Edit size={16} />
                         </button>
                         <button
                           onClick={() => handleDeleteProduct(p.id)}
-                          className="text-red-600 bg-red-50 p-2 rounded hover:bg-red-100"
+                          className="text-red-600 bg-red-50 p-2 rounded hover:bg-red-100 disabled:opacity-50"
+                          disabled={submitting}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -714,7 +765,7 @@ export default function Admin() {
 
       case "orders":
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-fade-in">
             <h2 className="text-2xl font-bold">Đơn đặt sách</h2>
             {orders.map((o) => (
               <Card
@@ -742,15 +793,17 @@ export default function Admin() {
                     {o.status}
                     </Badge>
                     <select
-                      className="border rounded p-1 text-sm outline-none"
+                      className="border rounded p-1 text-sm outline-none disabled:bg-gray-100"
                       value={o.status}
                       onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                      disabled={submitting}
                     >
                       <option value="pending">Chờ xử lý</option>
                       <option value="shipping">Đang giao</option>
                       <option value="completed">Đã nhận</option>
                       <option value="cancelled">Hủy đơn</option>
                     </select>
+                    {submitting && <Loader2 size={16} className="animate-spin text-gray-400"/>}
                 </div>
               </Card>
             ))}
@@ -759,7 +812,7 @@ export default function Admin() {
 
       case "users":
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-fade-in">
             <h2 className="text-2xl font-bold">Sinh viên</h2>
             <div className="bg-white rounded border overflow-x-auto">
               <table className="w-full text-sm text-left">
@@ -793,14 +846,14 @@ export default function Admin() {
 
       case "loyalty":
         return (
-           <div className="max-w-2xl space-y-6">
+           <div className="max-w-2xl space-y-6 animate-fade-in">
                 <h2 className="text-2xl font-bold">Cấu hình Điểm thưởng</h2>
                 <div className="grid md:grid-cols-2 gap-6">
                     <Card className="p-6">
                         <h3 className="font-bold mb-4 flex gap-2 items-center"><Star size={16} className="text-yellow-500"/> Tỷ lệ đổi điểm</h3>
                         <div className="flex items-center gap-2">
                             <span>1.000 VNĐ = </span>
-                            <input className="border p-1 w-20 text-center font-bold rounded" value={settings.point_ratio || ""} onChange={e => setSettings({...settings, point_ratio: e.target.value})}/>
+                            <input className="border p-1 w-20 text-center font-bold rounded disabled:bg-gray-100" value={settings.point_ratio || ""} onChange={e => setSettings({...settings, point_ratio: e.target.value})} disabled={submitting}/>
                             <span>điểm</span>
                         </div>
                     </Card>
@@ -809,19 +862,21 @@ export default function Admin() {
                          {['Silver', 'Gold', 'Diamond'].map(l => (
                              <div key={l} className="flex justify-between mb-2">
                                  <span>{l} Reader</span>
-                                 <input className="border p-1 w-24 text-right rounded" placeholder="Điểm" value={settings[`level_${l.toLowerCase()}`] || ""} onChange={e => setSettings({...settings, [`level_${l.toLowerCase()}`]: e.target.value})}/>
+                                 <input className="border p-1 w-24 text-right rounded disabled:bg-gray-100" placeholder="Điểm" value={settings[`level_${l.toLowerCase()}`] || ""} onChange={e => setSettings({...settings, [`level_${l.toLowerCase()}`]: e.target.value})} disabled={submitting}/>
                              </div>
                          ))}
                     </Card>
                 </div>
-                <Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white">Lưu cấu hình</Button>
+                <Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white min-w-[140px]" disabled={submitting}>
+                    {submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu cấu hình"}
+                </Button>
            </div>
         );
 
       case "analytics":
         if (!analytics) return <div className="p-10 text-center">Chưa có dữ liệu thống kê</div>;
         return (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fade-in">
                 <h2 className="text-2xl font-bold">Thống kê hoạt động</h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <Card className="p-4 bg-emerald-50 border-emerald-100">
@@ -846,20 +901,48 @@ export default function Admin() {
       
       case "settings":
         return (
-            <div className="max-w-xl space-y-6">
+            <div className="max-w-2xl space-y-6 animate-fade-in">
                 <h2 className="text-2xl font-bold">Cấu hình Hệ thống</h2>
-                <Card className="p-6 space-y-4">
-                    <div><label className="block text-sm font-bold mb-1">Tên cổng thông tin</label><input className="w-full border p-2 rounded" value={settings.site_name || ""} onChange={e => setSettings({...settings, site_name: e.target.value})}/></div>
-                    <div><label className="block text-sm font-bold mb-1">Email ban quản trị</label><input className="w-full border p-2 rounded" value={settings.contact_email || ""} onChange={e => setSettings({...settings, contact_email: e.target.value})}/></div>
-                    <div><label className="block text-sm font-bold mb-1">Hotline thư viện</label><input className="w-full border p-2 rounded" value={settings.hotline || ""} onChange={e => setSettings({...settings, hotline: e.target.value})}/></div>
-                    <Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white">Lưu thay đổi</Button>
+                
+                {/* 1. THÔNG TIN NGÂN HÀNG (MỚI) */}
+                <Card className="p-6">
+                    <h3 className="font-bold mb-4 flex items-center gap-2 text-emerald-700 border-b pb-2"><CreditCard size={18}/> Thông tin Ngân hàng (QR Code)</h3>
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold mb-1 text-gray-700">Mã ngân hàng (BIN)</label>
+                            <input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: 970422 (MBBank)" value={settings.bank_bin || ""} onChange={e => setSettings({...settings, bank_bin: e.target.value})} disabled={submitting}/>
+                            <span className="text-xs text-gray-400">Tra cứu BIN tại VietQR.io</span>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold mb-1 text-gray-700">Số tài khoản</label>
+                            <input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: 123456789" value={settings.bank_number || ""} onChange={e => setSettings({...settings, bank_number: e.target.value})} disabled={submitting}/>
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-bold mb-1 text-gray-700">Tên chủ tài khoản</label>
+                            <input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: NGUYEN VAN A" value={settings.bank_name || ""} onChange={e => setSettings({...settings, bank_name: e.target.value})} disabled={submitting}/>
+                        </div>
+                    </div>
                 </Card>
+
+                {/* 2. THÔNG TIN CHUNG */}
+                <Card className="p-6 space-y-4">
+                    <h3 className="font-bold mb-2 flex items-center gap-2 text-gray-700 border-b pb-2"><Settings size={18}/> Thông tin chung</h3>
+                    <div><label className="block text-sm font-bold mb-1">Tên cổng thông tin</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.site_name || ""} onChange={e => setSettings({...settings, site_name: e.target.value})} disabled={submitting}/></div>
+                    <div><label className="block text-sm font-bold mb-1">Email ban quản trị</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.contact_email || ""} onChange={e => setSettings({...settings, contact_email: e.target.value})} disabled={submitting}/></div>
+                    <div><label className="block text-sm font-bold mb-1">Hotline thư viện</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.hotline || ""} onChange={e => setSettings({...settings, hotline: e.target.value})} disabled={submitting}/></div>
+                </Card>
+
+                <div className="flex justify-end">
+                    <Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white min-w-[140px]" disabled={submitting}>
+                        {submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu thay đổi"}
+                    </Button>
+                </div>
             </div>
         );
 
       case "contacts":
          return (
-             <div className="space-y-4">
+             <div className="space-y-4 animate-fade-in">
                  <h2 className="text-2xl font-bold">Hòm thư góp ý</h2>
                  {contacts.map(c => (
                      <Card key={c.id} className="p-4 flex gap-4">
@@ -873,7 +956,9 @@ export default function Admin() {
                          <div className="flex flex-col gap-2 min-w-[120px]">
                              <Badge color={c.status === "processed" ? "green" : "yellow"}>{c.status === "processed" ? "Đã trả lời" : "Chờ xử lý"}</Badge>
                              {c.status === "new" && (
-                                 <Button size="sm" onClick={() => updateContactStatus(c.id, "processed")} className="bg-emerald-600 text-white text-xs">Đánh dấu xong</Button>
+                                 <Button size="sm" onClick={() => updateContactStatus(c.id, "processed")} className="bg-emerald-600 text-white text-xs" disabled={submitting}>
+                                     {submitting ? "Đang xử lý..." : "Đánh dấu xong"}
+                                 </Button>
                              )}
                              <a href={`mailto:${c.email}`} className="text-xs text-blue-600 text-center hover:underline">Gửi mail trả lời</a>
                          </div>
@@ -914,15 +999,17 @@ export default function Admin() {
             <button
               key={item.id}
               onClick={() => {
+                if (submitting) return; // Không cho chuyển tab khi đang submit
                 setActiveTab(item.id);
                 setSidebarOpen(false);
-                setIsEditingProd(false); // Reset trạng thái edit khi chuyển tab
+                setIsEditingProd(false);
               }}
+              disabled={submitting}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
                 activeTab === item.id
                   ? "bg-emerald-600 text-white shadow-md"
                   : "text-gray-600 hover:bg-gray-100"
-              }`}
+              } ${submitting ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {item.icon}
               {item.label}

@@ -15,9 +15,24 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use crate::utils::email::{ send_order_shipping_email, send_order_thank_you_email };
 use rust_decimal::prelude::ToPrimitive;
+use std::collections::HashMap; // <-- Thêm HashMap
 
-// --- MIDDLEWARE CHECK ADMIN ---
+// --- MIDDLEWARE ---
 pub struct AdminUser(pub String);
+
+// --- HELPER FORMAT TIỀN TỆ ---
+fn format_money(amount: f64) -> String {
+    let s = (amount as i64).to_string();
+    let mut result = String::new();
+    let len = s.len();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    format!("{} đ", result)
+}
 
 #[async_trait]
 impl<S> FromRequestParts<S> for AdminUser where S: Send + Sync, AppState: From<S>, S: Clone {
@@ -47,19 +62,8 @@ impl<S> FromRequestParts<S> for AdminUser where S: Send + Sync, AppState: From<S
     }
 }
 
-// --- HELPER FORMAT TIỀN TỆ ---
-fn format_money(amount: f64) -> String {
-    let s = (amount as i64).to_string();
-    let mut result = String::new();
-    let len = s.len();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    format!("{} đ", result)
-}
+// ... existing code (CreateCategoryReq, create_category, delete_category, etc.) ...
+// (Giữ nguyên các hàm categories, products, orders, users cũ)
 
 // --- HANDLERS: CATEGORIES ---
 #[derive(Deserialize)]
@@ -106,18 +110,16 @@ async fn delete_category(
     (StatusCode::OK, Json("Đã xóa danh mục")).into_response()
 }
 
-// --- HANDLERS: ORDERS ---
-
+// --- HANDLERS: ORDERS (Giữ nguyên) ---
 #[derive(Deserialize)]
 struct UpdateStatusReq {
     status: String,
 }
 
-// Struct hiển thị lịch sử đơn hàng cho Admin
 #[derive(Debug, Serialize, FromRow)]
 pub struct AdminOrderHistory {
     pub id: String,
-    pub user_name: Option<String>, // Thêm tên người mua
+    pub user_name: Option<String>, 
     pub final_amount: Decimal,
     pub status: String,
     pub points_earned: i32,
@@ -136,10 +138,7 @@ async fn get_all_orders(State(state): State<AppState>, _: AdminUser) -> impl Int
 
     match orders {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => {
-            println!("Error get_all_orders: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response()
-        },
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response(),
     }
 }
 
@@ -163,7 +162,6 @@ async fn update_order_status(
     if let Some((old_status, user_id, points, email, final_amount)) = order_info {
         let new_status = payload.status.as_str();
 
-        // Gửi mail khi giao hàng
         if old_status != "shipping" && new_status == "shipping" {
             let items: Vec<(String, i32, Decimal)> = sqlx::query_as(
                 "SELECT p.name, oi.quantity, oi.price 
@@ -194,15 +192,11 @@ async fn update_order_status(
             send_order_shipping_email(email.clone(), id.clone(), items_html, total_bill_str);
         }
 
-        // Cộng điểm khi hoàn thành
         if old_status != "completed" && new_status == "completed" {
             let _ = sqlx::query("UPDATE users SET points = points + ? WHERE id = ?")
                 .bind(points).bind(&user_id).execute(&mut *tx).await;
-            
             send_order_thank_you_email(email.clone(), id.clone(), points);
-        } 
-        // Trừ điểm nếu hủy sau khi đã hoàn thành
-        else if old_status == "completed" && new_status != "completed" {
+        } else if old_status == "completed" && new_status != "completed" {
             let _ = sqlx::query("UPDATE users SET points = points - ? WHERE id = ?")
                 .bind(points).bind(&user_id).execute(&mut *tx).await;
         }
@@ -218,20 +212,19 @@ async fn update_order_status(
     }
 }
 
-// --- HANDLERS: PRODUCTS (QUẢN LÝ SÁCH/GIÁO TRÌNH) ---
-
+// --- HANDLERS: PRODUCTS (Giữ nguyên) ---
 #[derive(Deserialize)]
 struct CreateProductReq {
     category_id: String,
-    name: String,           // Tên giáo trình
-    author: Option<String>, // Tác giả
-    publisher: Option<String>, // Nhà xuất bản
-    publication_year: Option<i32>, // Năm xuất bản
+    name: String,
+    author: Option<String>, 
+    publisher: Option<String>, 
+    publication_year: Option<i32>, 
     price: Decimal,
     stock: i32,
     images: Option<Vec<String>>,
     description: Option<String>,
-    specs: Option<Value>,   // Số trang, kích thước...
+    specs: Option<Value>,
 }
 
 async fn create_product(
@@ -240,21 +233,19 @@ async fn create_product(
     Json(payload): Json<CreateProductReq>
 ) -> impl IntoResponse {
     let id = suid();
-
     let images_json = sqlx::types::Json(payload.images.unwrap_or(vec![]));
     let specs_json = sqlx::types::Json(payload.specs.unwrap_or(serde_json::json!({})));
 
-    let res = sqlx
-        ::query(
+    let res = sqlx::query(
             "INSERT INTO products (id, category_id, name, author, publisher, publication_year, price, stock, images, description, specs) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(id)
         .bind(payload.category_id)
         .bind(payload.name)
-        .bind(payload.author)       // Bind tác giả
-        .bind(payload.publisher)    // Bind nhà xuất bản
-        .bind(payload.publication_year) // Bind năm
+        .bind(payload.author)
+        .bind(payload.publisher)
+        .bind(payload.publication_year)
         .bind(payload.price)
         .bind(payload.stock)
         .bind(images_json)
@@ -280,8 +271,7 @@ async fn update_product(
     let images_json = sqlx::types::Json(payload.images.unwrap_or(vec![]));
     let specs_json = sqlx::types::Json(payload.specs.unwrap_or(serde_json::json!({})));
 
-    let res = sqlx
-        ::query(
+    let res = sqlx::query(
             "UPDATE products SET category_id=?, name=?, author=?, publisher=?, publication_year=?, price=?, stock=?, images=?, description=?, specs=? 
              WHERE id=?"
         )
@@ -312,9 +302,7 @@ async fn delete_product(
     _: AdminUser,
     Path(id): Path<String>
 ) -> impl IntoResponse {
-    // Soft delete (Ẩn giáo trình thay vì xóa hẳn)
-    let res = sqlx
-        ::query("UPDATE products SET is_deleted = TRUE WHERE id = ?")
+    let res = sqlx::query("UPDATE products SET is_deleted = TRUE WHERE id = ?")
         .bind(id)
         .execute(&state.db).await;
 
@@ -326,8 +314,6 @@ async fn delete_product(
         }
     }
 }
-
-// --- HANDLERS: USERS ---
 
 async fn get_all_users(State(state): State<AppState>, _: AdminUser) -> impl IntoResponse {
     let users = sqlx
@@ -390,8 +376,31 @@ async fn update_settings(
     }
 }
 
-// --- HANDLERS: ANALYTICS ---
+// --- NEW PUBLIC CONFIG API ---
+// Hàm này KHÔNG cần AdminUser, để public cho client gọi
+pub async fn get_payment_config(State(state): State<AppState>) -> impl IntoResponse {
+    // Chỉ lấy các setting liên quan đến thanh toán và chung
+    let keys = vec!["bank_bin", "bank_number", "bank_name", "bank_template", "site_name", "hotline", "contact_email"];
+    
+    // Xây dựng câu query động (WHERE id IN (?, ?, ...))
+    let query_str = format!("SELECT * FROM settings WHERE id IN ({})", keys.iter().map(|_| "?").collect::<Vec<_>>().join(","));
+    
+    let mut query = sqlx::query_as::<_, SettingItem>(&query_str);
+    for key in keys {
+        query = query.bind(key);
+    }
 
+    let settings = query.fetch_all(&state.db).await.unwrap_or(vec![]);
+    
+    // Chuyển về dạng Map { "bank_bin": "...", "hotline": "..." }
+    let config_map: HashMap<String, String> = settings.into_iter()
+        .map(|item| (item.id, item.value.unwrap_or_default()))
+        .collect();
+
+    (StatusCode::OK, Json(config_map)).into_response()
+}
+
+// --- HANDLERS: ANALYTICS (Giữ nguyên) ---
 #[derive(Serialize)]
 struct AnalyticsData {
     revenue_month: f64,
@@ -403,31 +412,17 @@ struct AnalyticsData {
 async fn get_analytics(State(state): State<AppState>, _: AdminUser) -> impl IntoResponse {
     let revenue: (Option<Decimal>,) = sqlx
         ::query_as("SELECT SUM(final_amount) FROM orders WHERE status = 'completed'")
-        .fetch_one(&state.db).await
-        .unwrap_or((None,));
+        .fetch_one(&state.db).await.unwrap_or((None,));
 
     let orders_count: (i64,) = sqlx
-        ::query_as("SELECT COUNT(*) FROM orders")
-        .fetch_one(&state.db).await
-        .unwrap_or((0,));
+        ::query_as("SELECT COUNT(*) FROM orders").fetch_one(&state.db).await.unwrap_or((0,));
 
     let users_count: (i64,) = sqlx
-        ::query_as("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.db).await
-        .unwrap_or((0,));
+        ::query_as("SELECT COUNT(*) FROM users").fetch_one(&state.db).await.unwrap_or((0,));
 
     let top_prod_result: Result<Option<(String,)>, _> = sqlx::query_as(
-        "SELECT p.name 
-         FROM order_items oi
-         JOIN products p ON oi.product_id = p.id
-         JOIN orders o ON oi.order_id = o.id
-         WHERE o.status = 'completed'
-         GROUP BY p.id, p.name
-         ORDER BY SUM(oi.quantity) DESC
-         LIMIT 1"
-    )
-    .fetch_optional(&state.db)
-    .await;
+        "SELECT p.name FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN orders o ON oi.order_id = o.id WHERE o.status = 'completed' GROUP BY p.id, p.name ORDER BY SUM(oi.quantity) DESC LIMIT 1"
+    ).fetch_optional(&state.db).await;
 
     let top_prod = match top_prod_result {
         Ok(Some((name,))) => name,
@@ -445,7 +440,7 @@ async fn get_analytics(State(state): State<AppState>, _: AdminUser) -> impl Into
     (StatusCode::OK, Json(data)).into_response()
 }
 
-// --- HANDLERS: CONTACTS ---
+// --- CONTACTS ---
 #[derive(Debug, Serialize, FromRow)]
 pub struct ContactItem {
     pub id: String,
@@ -458,46 +453,27 @@ pub struct ContactItem {
 }
 
 async fn get_all_contacts(State(state): State<AppState>, _: AdminUser) -> impl IntoResponse {
-    let sql = "
-        SELECT c.id, c.user_id, u.name as user_name, c.email, c.message, c.status, c.created_at 
-        FROM contacts c
-        LEFT JOIN users u ON c.user_id = u.id
-        ORDER BY c.created_at DESC
-    ";
-    
-    let contacts = sqlx::query_as::<_, ContactItem>(sql)
-        .fetch_all(&state.db)
-        .await;
-
+    let sql = "SELECT c.id, c.user_id, u.name as user_name, c.email, c.message, c.status, c.created_at FROM contacts c LEFT JOIN users u ON c.user_id = u.id ORDER BY c.created_at DESC";
+    let contacts = sqlx::query_as::<_, ContactItem>(sql).fetch_all(&state.db).await;
     match contacts {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response(),
     }
 }
 
-async fn update_contact_status(
-    State(state): State<AppState>,
-    _: AdminUser,
-    Path(id): Path<String>,
-    Json(payload): Json<UpdateStatusReq>
-) -> impl IntoResponse {
-    let res = sqlx::query("UPDATE contacts SET status = ? WHERE id = ?")
-        .bind(payload.status)
-        .bind(id)
-        .execute(&state.db)
-        .await;
-
+async fn update_contact_status(State(state): State<AppState>, _: AdminUser, Path(id): Path<String>, Json(payload): Json<UpdateStatusReq>) -> impl IntoResponse {
+    let res = sqlx::query("UPDATE contacts SET status = ? WHERE id = ?").bind(payload.status).bind(id).execute(&state.db).await;
     match res {
         Ok(_) => (StatusCode::OK, Json("Updated")).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response(),
     }
 }
 
-// --- ROUTES ---
+// --- ROUTER ADMIN ---
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
-        .route("/categories", post(create_category))          // <-- MỚI: Tạo danh mục
-        .route("/categories/:id", delete(delete_category))    // <-- MỚI: Xóa danh mục
+        .route("/categories", post(create_category))
+        .route("/categories/:id", delete(delete_category))
         .route("/products", post(create_product))
         .route("/products/:id", put(update_product).delete(delete_product))
         .route("/orders", get(get_all_orders))
