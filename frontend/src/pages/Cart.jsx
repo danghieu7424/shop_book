@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Minus, Plus, Trash2, Book } from "lucide-react";
+import { Minus, Plus, Trash2 } from "lucide-react";
 import { useStore, actions } from "../store";
 import { Button } from "../components/UI";
 import { formatCurrency, LEVELS } from "../utils";
@@ -38,7 +38,7 @@ export default function Cart() {
   };
 
   const handleRemoveItem = async (itemId) => {
-    if (!window.confirm("Bạn muốn xóa giáo trình này khỏi giỏ?")) return;
+    if (!window.confirm("Bạn muốn xóa sản phẩm này?")) return;
 
     dispatch(actions.remove_from_cart(itemId));
 
@@ -71,18 +71,16 @@ export default function Cart() {
     };
   };
 
-  const { subtotal, discountAmount, total } = calculateTotal();
+  const { subtotal, discountPercent, discountAmount, total } = calculateTotal();
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
-      <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-          <Book className="text-emerald-600"/> Giỏ sách của bạn
-      </h2>
+      <h2 className="text-2xl font-bold mb-6">Giỏ hàng</h2>
       {cart.length === 0 ? (
-        <div className="text-center py-20 bg-white border border-dashed rounded-xl">
-          <p className="mb-4 text-gray-500">Bạn chưa chọn giáo trình nào.</p>
+        <div className="text-center py-20 bg-white border rounded">
+          <p className="mb-4 text-gray-500">Giỏ hàng trống</p>
           <div className="flex justify-center gap-4">
-            <Button onClick={() => navigate("/products")} className="bg-emerald-600 border-none text-white">Xem danh sách sách</Button>
+            <Button onClick={() => navigate("/products")}>Mua sắm ngay</Button>
           </div>
         </div>
       ) : (
@@ -91,7 +89,7 @@ export default function Cart() {
             {cart.map((item) => (
               <div
                 key={item.id}
-                className="bg-white p-4 border rounded-xl flex gap-4 items-center shadow-sm"
+                className="bg-white p-4 border rounded flex gap-4 items-center"
               >
                 <img
                   src={
@@ -99,58 +97,58 @@ export default function Cart() {
                       ? `${domain}${item.image}`
                       : "https://placehold.co/100"
                   }
-                  className="w-16 h-20 object-cover bg-gray-100 rounded border"
+                  className="w-16 h-16 object-contain bg-gray-100 rounded"
                   alt={item.name}
                 />
                 <div className="flex-1">
-                  <h3 className="font-semibold line-clamp-1 text-gray-800">{item.name}</h3>
-                  <div className="text-emerald-600 font-bold">
+                  <h3 className="font-semibold line-clamp-1">{item.name}</h3>
+                  <div className="text-blue-600">
                     {formatCurrency(item.price)}
                   </div>
-                  {/* Nếu có tác giả thì hiện ở đây nếu API trả về, tạm thời bỏ qua nếu chưa sync */}
                 </div>
-                <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleUpdateQuantity(item.id, -1)}
-                    className="p-1 hover:bg-white rounded shadow-sm transition-all"
+                    className="p-1 bg-gray-100 rounded hover:bg-gray-200"
                   >
                     <Minus size={14} />
                   </button>
-                  <span className="w-8 text-center font-bold text-sm">{item.quantity}</span>
+                  <span className="w-8 text-center">{item.quantity}</span>
                   <button
                     onClick={() => handleUpdateQuantity(item.id, 1)}
-                    className="p-1 hover:bg-white rounded shadow-sm transition-all"
+                    className="p-1 bg-gray-100 rounded hover:bg-gray-200"
                   >
                     <Plus size={14} />
                   </button>
                 </div>
                 <button
                   onClick={() => handleRemoveItem(item.id)}
-                  className="text-gray-400 hover:text-red-500 p-2 transition-colors"
+                  className="text-red-500 hover:text-red-700 p-2"
                 >
                   <Trash2 size={18} />
                 </button>
               </div>
             ))}
           </div>
-          <div className="bg-white p-6 border rounded-xl h-fit shadow-sm sticky top-4">
-            <h3 className="font-bold mb-4 text-lg">Tổng cộng</h3>
-            <div className="space-y-3 mb-6 text-sm">
-              <div className="flex justify-between text-gray-600">
+          <div className="bg-white p-6 border rounded h-fit">
+            <h3 className="font-bold mb-4">Thanh toán</h3>
+            <div className="space-y-2 mb-4 text-sm">
+              <div className="flex justify-between">
                 <span>Tạm tính:</span>
                 <span>{formatCurrency(subtotal)}</span>
               </div>
-              <div className="flex justify-between text-emerald-600 bg-emerald-50 p-2 rounded">
-                <span>Ưu đãi ({userInfo?.level || "BRONZE"}):</span>
+              <div className="flex justify-between text-green-600">
+                {/* HIỂN THỊ THÊM % GIẢM GIÁ */}
+                <span>Giảm giá ({userInfo?.level || "BRONZE"} - {discountPercent}%):</span>
                 <span>-{formatCurrency(discountAmount)}</span>
               </div>
-              <div className="flex justify-between font-bold text-xl pt-4 border-t text-red-600">
-                <span>Thành tiền:</span>
+              <div className="flex justify-between font-bold text-lg pt-2 border-t">
+                <span>Tổng:</span>
                 <span>{formatCurrency(total)}</span>
               </div>
             </div>
-            <Button onClick={() => navigate("/checkout")} className="w-full bg-emerald-600 hover:bg-emerald-700 border-none text-white py-3 text-lg">
-              Tiến hành đăng ký
+            <Button onClick={() => navigate("/checkout")} className="w-full">
+              Thanh toán
             </Button>
           </div>
         </div>

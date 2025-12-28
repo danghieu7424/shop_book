@@ -17,36 +17,42 @@ pub struct Product {
     pub category_id: String,
     pub category_name: Option<String>,
     pub name: String,
-    pub author: Option<String>,         // <-- CÓ TRƯỜNG AUTHOR
-    pub publisher: Option<String>,      // <-- CÓ TRƯỜNG PUBLISHER
+    pub author: Option<String>,
+    pub publisher: Option<String>,
     pub publication_year: Option<i32>,
-    pub price: Decimal,
+    pub price: Decimal,             // Giá gốc (Giá bìa)
+    pub sale_price: Option<Decimal>, // <-- THÊM: Giá khuyến mãi
     pub stock: i32,
     pub image: Option<String>,
+    pub images: Option<serde_json::Value>, 
     pub description: Option<String>,
+    pub specs: Option<serde_json::Value>,
+    pub rating: Option<Decimal>,
+    pub review_count: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ProductFilter {
     pub category_id: Option<String>,
     pub search: Option<String>,
-    pub sort: Option<String>, // price_asc, price_desc, new
+    pub sort: Option<String>,
 }
 
-// Lấy danh sách giáo trình (có lọc)
 async fn get_products(
     State(state): State<AppState>,
     Query(params): Query<ProductFilter>,
 ) -> impl IntoResponse {
+    // Lấy thêm cột sale_price
     let mut sql = String::from(
         "SELECT p.id, p.category_id, c.name as category_name, p.name, 
                 p.author, p.publisher, p.publication_year,
-                p.price, p.stock, 
+                p.price, p.sale_price, p.stock, 
                 CASE 
                     WHEN JSON_VALID(p.images) THEN JSON_UNQUOTE(JSON_EXTRACT(p.images, '$[0]'))
-                    ELSE p.images 
+                    ELSE p.image 
                 END as image,
-                p.description
+                p.images,
+                p.description, p.specs, p.rating, p.review_count
          FROM products p
          LEFT JOIN categories c ON p.category_id = c.id
          WHERE p.is_deleted = 0"
@@ -55,20 +61,24 @@ async fn get_products(
     let mut args = Vec::new();
 
     if let Some(cat_id) = params.category_id {
-        sql.push_str(" AND p.category_id = ?");
-        args.push(cat_id);
+        if cat_id != "all" {
+            sql.push_str(" AND p.category_id = ?");
+            args.push(cat_id);
+        }
     }
 
     if let Some(s) = params.search {
-        let search_term = format!("%{}%", s);
-        sql.push_str(" AND (p.name LIKE ? OR p.author LIKE ?)");
-        args.push(search_term.clone());
-        args.push(search_term);
+        if !s.is_empty() {
+            let search_term = format!("%{}%", s);
+            sql.push_str(" AND (p.name LIKE ? OR p.author LIKE ?)");
+            args.push(search_term.clone());
+            args.push(search_term);
+        }
     }
 
     match params.sort.as_deref() {
-        Some("price_asc") => sql.push_str(" ORDER BY p.price ASC"),
-        Some("price_desc") => sql.push_str(" ORDER BY p.price DESC"),
+        Some("price_asc") => sql.push_str(" ORDER BY COALESCE(p.sale_price, p.price) ASC"), // Sắp xếp theo giá thực bán
+        Some("price_desc") => sql.push_str(" ORDER BY COALESCE(p.sale_price, p.price) DESC"),
         _ => sql.push_str(" ORDER BY p.created_at DESC"),
     }
 
@@ -88,7 +98,6 @@ async fn get_products(
     }
 }
 
-// Lấy chi tiết một cuốn giáo trình
 async fn get_product_detail(
     State(state): State<AppState>,
     Path(id): Path<String>
@@ -96,7 +105,8 @@ async fn get_product_detail(
     let sql = "
         SELECT p.id, p.category_id, c.name as category_name, p.name, 
                p.author, p.publisher, p.publication_year,
-               p.price, p.stock, p.images as image, p.description
+               p.price, p.sale_price, p.stock, 
+               p.image, p.images, p.description, p.specs, p.rating, p.review_count
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
         WHERE p.id = ?
