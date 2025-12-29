@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, Plus, User } from "lucide-react";
 import { useStore, actions } from "../store";
-import { Button, Card } from "../components/UI";
+import { Button, Card, Badge } from "../components/UI";
 import { formatCurrency } from "../utils";
 
 export default function ProductList() {
@@ -31,6 +31,9 @@ export default function ProductList() {
 
   const handleQuickAdd = async (product, e) => {
     e.stopPropagation(); 
+    // Kiểm tra tồn kho trước khi thêm
+    if (product.stock === 0) return;
+
     dispatch(actions.add_to_cart(product));
     
     if (userInfo) {
@@ -80,34 +83,49 @@ export default function ProductList() {
               {filtered.map((p) => (
                 <Card key={p.id} onClick={() => navigate(`/product/${p.id}`)} className="flex flex-col h-full hover:shadow-lg transition-shadow group cursor-pointer border-emerald-100/50 relative">
                   
-                  {/* Badge Sale */}
-                  {p.sale_price && Number(p.sale_price) > 0 && Number(p.sale_price) < Number(p.price) && (
-                      <div className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded shadow-md z-10">
+                  {/* Badge Sale (Chỉ hiện khi CÒN hàng và CÓ giảm giá) */}
+                  {p.stock > 0 && p.sale_price && Number(p.sale_price) > 0 && Number(p.sale_price) < Number(p.price) && (
+                      <div className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded shadow-md z-20">
                           -{Math.round(((p.price - p.sale_price) / p.price) * 100)}%
                       </div>
                   )}
 
                   <div className="aspect-[3/4] bg-gray-100 relative overflow-hidden rounded-t-lg">
                     <img src={p.image || (p.images && p.images[0]) ? `${domain}${p.image || p.images[0]}` : "https://placehold.co/300x400?text=No+Cover"} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" alt={p.name} />
+                    
+                    {/* --- HIỆN THÔNG BÁO HẾT HÀNG --- */}
+                    {p.stock === 0 && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10 backdrop-blur-[1px]">
+                            <span className="text-white font-bold text-sm uppercase border border-white px-3 py-1 tracking-wider transform -rotate-12">Tạm hết</span>
+                        </div>
+                    )}
                   </div>
                   
                   <div className="p-4 flex flex-col flex-1">
                     <div className="text-xs text-emerald-600 font-semibold mb-1 uppercase tracking-wide">{categories.find((c) => c.id === p.category_id)?.name || "Giáo trình"}</div>
-                    <h3 className="font-bold text-gray-800 mb-1 line-clamp-2 min-h-[3rem] group-hover:text-emerald-700 transition-colors">{p.name}</h3>
+                    <h3 className={`font-bold mb-1 line-clamp-2 min-h-[3rem] transition-colors ${p.stock === 0 ? 'text-gray-400' : 'text-gray-800 group-hover:text-emerald-700'}`}>{p.name}</h3>
                     {p.author && (<div className="flex items-center gap-1 text-xs text-gray-500 mb-3"><User size={12}/> {p.author}</div>)}
 
                     <div className="mt-auto flex justify-between items-center pt-2 border-t border-dashed">
                       <div className="flex flex-col">
                           {p.sale_price && Number(p.sale_price) > 0 ? (
                               <>
-                                <span className="text-lg font-bold text-red-600">{formatCurrency(p.sale_price)}</span>
+                                <span className={`text-lg font-bold ${p.stock === 0 ? 'text-gray-400' : 'text-red-600'}`}>{formatCurrency(p.sale_price)}</span>
                                 <span className="text-xs text-gray-400 line-through">{formatCurrency(p.price)}</span>
                               </>
                           ) : (
-                              <span className="text-lg font-bold text-emerald-700">{formatCurrency(p.price)}</span>
+                              <span className={`text-lg font-bold ${p.stock === 0 ? 'text-gray-400' : 'text-emerald-700'}`}>{formatCurrency(p.price)}</span>
                           )}
                       </div>
-                      <Button onClick={(e) => handleQuickAdd(p, e)} className="!p-2 rounded-full w-10 h-10 flex items-center justify-center shadow-sm hover:shadow-md transition-all active:scale-90 bg-emerald-600 hover:bg-emerald-700 border-none text-white"><Plus size={20} /></Button>
+                      
+                      {/* Nút thêm nhanh (Vô hiệu hóa nếu hết hàng) */}
+                      <Button 
+                        onClick={(e) => handleQuickAdd(p, e)} 
+                        disabled={p.stock === 0}
+                        className={`!p-2 rounded-full w-10 h-10 flex items-center justify-center shadow-sm transition-all border-none text-white ${p.stock === 0 ? 'bg-gray-300 cursor-not-allowed hover:bg-gray-300 shadow-none' : 'bg-emerald-600 hover:bg-emerald-700 hover:shadow-md active:scale-90'}`}
+                      >
+                        <Plus size={20} />
+                      </Button>
                     </div>
                   </div>
                 </Card>

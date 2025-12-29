@@ -5,8 +5,9 @@ module.exports = {
     entry: "./src/index.js", // Dẫn tới file index.js ta đã tạo
     output: {
         // path: path.join(__dirname, "/build"), // Thư mục chứa file được build ra
-        path: path.join(__dirname, '..', "build/public"), // Thư mục chứa file được build ra
-        filename: "src/js/[name].js", // Tên file JS và phân tách theo thư mục js/
+        // path: path.join(__dirname, '..', "/backend/public"), // Thư mục chứa file được build ra
+        path: path.join(__dirname, '..', "/build/public"), // Thư mục chứa file được build ra
+        filename: "src/js/[name].[contenthash].js", // Tên file JS và phân tách theo thư mục js/
         publicPath: "/",
     },
     module: {

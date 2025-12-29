@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Minus, Plus, Star, Check, Shield, Book, User, Calendar, Building2, Truck, AlertCircle } from 'lucide-react';
+import { ShoppingCart, Minus, Plus, Star, Check, Shield, Book, User, Calendar, Building2, Truck, AlertCircle, Info } from 'lucide-react';
 import { useStore, actions } from '../store';
 import { Button, Badge } from '../components/UI';
 import { formatCurrency } from '../utils';
@@ -21,8 +21,8 @@ export default function ProductDetail() {
     const [newRating, setNewRating] = useState(5);
     const [newComment, setNewComment] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [hasPurchased, setHasPurchased] = useState(false);
 
-    // Hàm xử lý ảnh an toàn (Parse JSON string lỗi)
     const getProductImages = (prod) => {
         if (!prod) return [];
         let images = [];
@@ -50,20 +50,86 @@ export default function ProductDetail() {
                 const imgs = getProductImages(prodData);
                 if (imgs.length > 0) setActiveImg(imgs[0]);
                 if (revRes.ok) { setReviews(await revRes.json()); }
+
+                if (userInfo) {
+                    const checkRes = await fetch(`${domain}/api/orders/check-purchase/${id}`, { credentials: 'include' });
+                    if (checkRes.ok) {
+                        const data = await checkRes.json();
+                        setHasPurchased(data.has_purchased);
+                    }
+                }
             } catch (e) { console.error("Detail Error:", e); setError(e.message); } finally { setLoading(false); }
         };
         loadData();
-    }, [id, domain]);
+    }, [id, domain, userInfo]);
 
     const handlePostReview = async () => { if (!userInfo) return alert("Vui lòng đăng nhập để đánh giá"); if (!newComment.trim()) return alert("Vui lòng nhập nội dung"); setSubmitting(true); try { const res = await fetch(`${domain}/api/reviews`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product_id: id, rating: newRating, content: newComment }), credentials: 'include' }); if (res.ok) { alert("Cảm ơn đánh giá của bạn!"); setNewComment(''); setNewRating(5); const revRes = await fetch(`${domain}/api/reviews/${id}`); if (revRes.ok) setReviews(await revRes.json()); } else { alert("Có lỗi xảy ra khi gửi đánh giá"); } } catch(e) { console.error(e); } setSubmitting(false); };
-    const handleQuantityChange = (delta) => { const newQty = quantity + delta; if (product && newQty >= 1 && newQty <= product.stock) setQuantity(newQty); };
-    const handleAddToCart = async () => { if (!product) return; dispatch(actions.add_to_cart({ ...product, image: activeImg, quantity: quantity })); if (userInfo) { const existingItem = cart.find(i => i.id === product.id); const finalQty = (existingItem ? existingItem.quantity : 0) + quantity; try { await fetch(`${domain}/api/cart`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ product_id: product.id, quantity: finalQty }), credentials: 'include' }); } catch(e) { console.error("Lỗi lưu giỏ hàng", e); } } alert(`Đã thêm ${quantity} quyển vào giỏ hàng!`); };
+    
+    // Logic thay đổi số lượng bằng nút (+/-)
+    const handleQuantityChange = (delta) => { 
+        // Nếu quantity đang là chuỗi rỗng (do đang xóa để nhập), coi như là 0
+        const currentQty = quantity === "" ? 0 : quantity;
+        const newQty = currentQty + delta;
+        if (product && newQty >= 1 && newQty <= product.stock) setQuantity(newQty); 
+    };
+
+    // --- LOGIC MỚI: NHẬP TAY SỐ LƯỢNG ---
+    const handleInputQuantity = (e) => {
+        const val = e.target.value;
+        // Cho phép xóa trắng để người dùng nhập lại
+        if (val === "") {
+            setQuantity("");
+            return;
+        }
+        
+        const numVal = parseInt(val, 10);
+        if (!isNaN(numVal) && numVal > 0) {
+            // Nếu nhập quá tồn kho -> Set về max tồn kho
+            if (product && numVal > product.stock) {
+                setQuantity(product.stock);
+            } else {
+                setQuantity(numVal);
+            }
+        }
+    };
+
+    const handleBlurQuantity = () => {
+        // Nếu người dùng để trống hoặc nhập 0 khi focus out -> Reset về 1
+        if (quantity === "" || quantity < 1) {
+            setQuantity(1);
+        }
+    };
+    // -------------------------------------
+
+    const handleAddToCart = async () => { 
+        if (!product) return;
+        // Đảm bảo quantity hợp lệ trước khi add
+        const finalQ = (quantity === "" || quantity < 1) ? 1 : quantity;
+        
+        dispatch(actions.add_to_cart({ ...product, image: activeImg, quantity: finalQ })); 
+        
+        if (userInfo) { 
+            const existingItem = cart.find(i => i.id === product.id); 
+            const finalQty = (existingItem ? existingItem.quantity : 0) + finalQ; 
+            try { 
+                await fetch(`${domain}/api/cart`, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ product_id: product.id, quantity: finalQty }), 
+                    credentials: 'include' 
+                }); 
+            } catch(e) { console.error("Lỗi lưu giỏ hàng", e); } 
+        } 
+        alert(`Đã thêm ${finalQ} quyển vào giỏ hàng!`); 
+        setQuantity(1); // Reset sau khi add
+    };
 
     if (loading) return <div className="p-20 text-center flex flex-col items-center"><div className="w-10 h-10 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mb-4"></div><span className="text-gray-500">Đang tải thông tin sách...</span></div>;
     if (error) return <div className="p-20 text-center flex flex-col items-center gap-4"><AlertCircle size={48} className="text-red-400"/><h2 className="text-xl font-bold text-gray-700">{error}</h2><Button onClick={() => navigate('/products')}>Quay lại danh sách</Button></div>;
     if (!product) return null;
 
     const productImages = getProductImages(product);
+    const specsArray = product.specs ? Object.entries(product.specs).map(([key, value]) => ({ label: key, value: String(value) })) : [];
 
     return (
         <div className="container mx-auto px-4 py-8 animate-fade-in">
@@ -93,12 +159,50 @@ export default function ProductDetail() {
                         {product.sale_price && Number(product.sale_price) > 0 ? (
                             <div className="flex items-baseline gap-3 mb-4"><span className="text-3xl font-bold text-red-600">{formatCurrency(product.sale_price)}</span><span className="text-gray-400 line-through text-lg">{formatCurrency(product.price)}</span><Badge color="red">-{Math.round(((product.price - product.sale_price) / product.price) * 100)}%</Badge></div>
                         ) : (<div className="flex items-baseline gap-4 mb-4"><span className="text-3xl font-bold text-emerald-700">{formatCurrency(product.price)}</span></div>)}
-                        <div className="flex flex-col sm:flex-row gap-4"><div className="flex items-center border border-gray-300 rounded-lg w-fit bg-white h-12"><button onClick={() => handleQuantityChange(-1)} className="px-3 h-full hover:bg-gray-100 disabled:opacity-50 border-r" disabled={quantity <= 1}><Minus size={18}/></button><span className="w-12 text-center font-bold text-lg">{quantity}</span><button onClick={() => handleQuantityChange(1)} className="px-3 h-full hover:bg-gray-100 disabled:opacity-50 border-l" disabled={quantity >= product.stock}><Plus size={18}/></button></div><Button onClick={handleAddToCart} disabled={product.stock === 0} className="flex-1 h-12 text-lg shadow-lg bg-emerald-600 hover:bg-emerald-700 border-none text-white"><ShoppingCart className="mr-2"/> {product.stock > 0 ? 'Thêm vào giỏ hàng' : 'Liên hệ thư viện'}</Button></div>
+                        
+                        <div className="flex flex-col sm:flex-row gap-4">
+                            <div className="flex items-center border border-gray-300 rounded-lg w-fit bg-white h-12 overflow-hidden">
+                                <button onClick={() => handleQuantityChange(-1)} className="px-3 h-full hover:bg-gray-100 disabled:opacity-50 border-r" disabled={quantity <= 1}><Minus size={18}/></button>
+                                {/* INPUT NHẬP SỐ LƯỢNG */}
+                                <input 
+                                    type="number" 
+                                    className="w-16 text-center font-bold text-lg outline-none h-full appearance-none" 
+                                    value={quantity} 
+                                    onChange={handleInputQuantity}
+                                    onBlur={handleBlurQuantity}
+                                    min="1"
+                                    max={product.stock}
+                                />
+                                <button onClick={() => handleQuantityChange(1)} className="px-3 h-full hover:bg-gray-100 disabled:opacity-50 border-l" disabled={quantity >= product.stock}><Plus size={18}/></button>
+                            </div>
+                            <Button onClick={handleAddToCart} disabled={product.stock === 0} className="flex-1 h-12 text-lg shadow-lg bg-emerald-600 hover:bg-emerald-700 border-none text-white"><ShoppingCart className="mr-2"/> {product.stock > 0 ? 'Thêm vào giỏ hàng' : 'Liên hệ thư viện'}</Button>
+                        </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-sm text-gray-600 p-2"><div className="flex gap-2 items-center"><Shield size={18} className="text-emerald-600"/> Đảm bảo sách chính hãng</div><div className="flex gap-2 items-center"><Check size={18} className="text-emerald-600"/> Đổi trả lỗi in ấn</div><div className="flex gap-2 items-center"><Truck size={18} className="text-emerald-600"/> Giao nhanh trong trường</div><div className="flex gap-2 items-center"><Book size={18} className="text-emerald-600"/> Hỗ trợ bọc sách plastic</div></div>
                 </div>
             </div>
-            <div className="bg-white rounded-xl border shadow-sm overflow-hidden mt-8"><div className="flex border-b overflow-x-auto">{['desc', 'reviews'].map(tab => (<button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-4 font-bold border-b-2 whitespace-nowrap transition-colors capitalize ${activeTab === tab ? 'border-emerald-600 text-emerald-600 bg-emerald-50' : 'border-transparent text-gray-600 hover:bg-gray-50'}`}>{tab === 'desc' ? 'Giới thiệu nội dung' : `Đánh giá (${reviews.length})`}</button>))}</div><div className="p-6 md:p-8 min-h-[200px]">{activeTab === 'desc' && <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed">{product.description || "Chưa có mô tả chi tiết cho giáo trình này."}</div>}{activeTab === 'reviews' && (<div><div className="bg-gray-50 p-6 rounded-lg mb-8 border shadow-sm"><h3 className="font-bold mb-4 text-lg">Đánh giá giáo trình này</h3>{userInfo ? (<div className="space-y-4"><div className="flex gap-2 items-center"><span className="text-sm font-medium">Đánh giá:</span>{[1,2,3,4,5].map(star => (<button key={star} onClick={() => setNewRating(star)} className="focus:outline-none transition-transform hover:scale-110" type="button"><Star size={28} fill={star <= newRating ? "#FACC15" : "white"} className={star <= newRating ? "text-yellow-400" : "text-gray-300"} /></button>))}</div><textarea className="w-full border rounded-lg p-3 focus:ring-2 ring-emerald-500 outline-none resize-none bg-white" rows="3" placeholder="Nội dung sách có hữu ích không?..." value={newComment} onChange={e => setNewComment(e.target.value)}/><div className="flex justify-end"><Button className="bg-emerald-600 hover:bg-emerald-700 border-none text-white" onClick={handlePostReview} disabled={submitting}>{submitting ? "Đang gửi..." : "Gửi đánh giá"}</Button></div></div>) : (<div className="text-gray-500 text-center">Vui lòng đăng nhập để đánh giá.</div>)}</div><div className="space-y-6">{reviews.length === 0 ? (<div className="text-center text-gray-500 py-10">Chưa có đánh giá nào.</div>) : (reviews.map((review) => (<div key={review.id} className="border-b pb-6 last:border-0 last:pb-0"><div className="flex items-center gap-3 mb-2"><div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold text-lg select-none">{review.user_name ? review.user_name.charAt(0).toUpperCase() : <User size={20}/>}</div><div><div className="font-bold text-gray-800">{review.user_name || 'Ẩn danh'}</div><div className="text-xs text-gray-400">{new Date(review.created_at).toLocaleDateString('vi-VN')}</div></div></div><div className="pl-13"><div className="flex text-yellow-400 mb-2">{[...Array(5)].map((_, i) => (<Star key={i} size={14} fill={i < review.rating ? "currentColor" : "none"} className={i < review.rating ? "" : "text-gray-300"}/>))}</div><p className="text-gray-700">{review.content}</p></div></div>)))}</div></div>)}</div></div>
+            
+            <div className="bg-white rounded-xl border shadow-sm overflow-hidden mt-8">
+                <div className="flex border-b overflow-x-auto">
+                    {['desc', 'specs', 'reviews'].map(tab => (
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-4 font-bold border-b-2 whitespace-nowrap transition-colors capitalize ${activeTab === tab ? 'border-emerald-600 text-emerald-600 bg-emerald-50' : 'border-transparent text-gray-600 hover:bg-gray-50'}`}>{tab === 'desc' ? 'Giới thiệu nội dung' : tab === 'specs' ? 'Thông tin chi tiết' : `Đánh giá (${reviews.length})`}</button>
+                    ))}
+                </div>
+
+                <div className="p-6 md:p-8 min-h-[200px]">
+                    {activeTab === 'desc' && <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed">{product.description || "Chưa có mô tả chi tiết cho giáo trình này."}</div>}
+                    
+                    {activeTab === 'specs' && (
+                        <div>
+                            {specsArray.length > 0 ? (
+                                <table className="w-full max-w-2xl text-sm border-collapse"><tbody>{specsArray.map((spec, index) => (<tr key={index} className="border-b last:border-0 hover:bg-gray-50"><td className="py-3 px-4 bg-gray-50 font-medium w-1/3 text-gray-600 border-r">{spec.label}</td><td className="py-3 px-4 text-gray-800 font-medium">{spec.value}</td></tr>))}</tbody></table>
+                            ) : (<div className="text-gray-500 italic flex items-center justify-center gap-2 py-8 bg-gray-50 rounded-lg"><Info size={20}/> Chưa có thông tin chi tiết.</div>)}
+                        </div>
+                    )}
+
+                    {activeTab === 'reviews' && (<div><div className="bg-gray-50 p-6 rounded-lg mb-8 border shadow-sm"><h3 className="font-bold mb-4 text-lg">Đánh giá giáo trình này</h3>{userInfo ? (hasPurchased ? (<div className="space-y-4"><div className="flex gap-2 items-center"><span className="text-sm font-medium">Đánh giá:</span>{[1,2,3,4,5].map(star => (<button key={star} onClick={() => setNewRating(star)} className="focus:outline-none transition-transform hover:scale-110" type="button"><Star size={28} fill={star <= newRating ? "#FACC15" : "white"} className={star <= newRating ? "text-yellow-400" : "text-gray-300"} /></button>))}</div><textarea className="w-full border rounded-lg p-3 focus:ring-2 ring-emerald-500 outline-none resize-none bg-white" rows="3" placeholder="Nội dung sách có hữu ích không?..." value={newComment} onChange={e => setNewComment(e.target.value)}/><div className="flex justify-end"><Button className="bg-emerald-600 hover:bg-emerald-700 border-none text-white" onClick={handlePostReview} disabled={submitting}>{submitting ? "Đang gửi..." : "Gửi đánh giá"}</Button></div></div>) : (<div className="text-orange-600 bg-orange-50 p-4 rounded text-center border border-orange-100">Bạn cần mua và nhận sách thành công để có thể đánh giá.</div>)) : (<div className="text-gray-500 text-center">Vui lòng đăng nhập để đánh giá.</div>)}</div><div className="space-y-6">{reviews.length === 0 ? (<div className="text-center text-gray-500 py-10">Chưa có đánh giá nào.</div>) : (reviews.map((review) => (<div key={review.id} className="border-b pb-6 last:border-0 last:pb-0"><div className="flex items-center gap-3 mb-2"><div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold text-lg select-none">{review.user_name ? review.user_name.charAt(0).toUpperCase() : <User size={20}/>}</div><div><div className="font-bold text-gray-800">{review.user_name || 'Ẩn danh'}</div><div className="text-xs text-gray-400">{new Date(review.created_at).toLocaleDateString('vi-VN')}</div></div></div><div className="pl-13"><div className="flex text-yellow-400 mb-2">{[...Array(5)].map((_, i) => (<Star key={i} size={14} fill={i < review.rating ? "currentColor" : "none"} className={i < review.rating ? "" : "text-gray-300"}/>))}</div><p className="text-gray-700">{review.content}</p></div></div>)))}</div></div>)}
+                </div>
+            </div>
         </div>
     );
 }

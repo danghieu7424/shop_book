@@ -13,6 +13,8 @@ import Login from './pages/Login';
 import Admin from './pages/Admin';
 import Contact from './pages/Contact';
 import About from './pages/About';
+import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
 
 export default function MainContent() {
   const [state, dispatch] = useStore();
@@ -74,6 +76,9 @@ export default function MainContent() {
           <Route path="profile" element={<Profile />} />
           <Route path="contact" element={<Contact />} />
           <Route path="about" element={<About />} />
+           {/* Thêm route mới */}
+          <Route path="terms" element={<Terms />} />
+          <Route path="privacy" element={<Privacy />} />
           
           <Route path="admin" element={<Admin />} />
           

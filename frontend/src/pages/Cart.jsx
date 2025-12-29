@@ -59,28 +59,45 @@ export default function Cart() {
       (sum, item) => sum + Number(item.price) * item.quantity,
       0
     );
+    
+    // --- SỬA LỖI: Tính Level & Giảm giá dựa trên ĐIỂM (Points) thực tế ---
     let discountPercent = 0;
-    const levelKey = userInfo?.level || "BRONZE";
-    if (LEVELS[levelKey]) discountPercent = LEVELS[levelKey].discount;
+    let levelName = "Thành viên";
+
+    if (userInfo) {
+        const points = userInfo.points || 0;
+        // Sắp xếp level từ cao xuống thấp (Diamond -> Gold -> Silver -> Bronze)
+        const sortedLevels = Object.values(LEVELS).sort((a, b) => b.min - a.min);
+        // Tìm level cao nhất mà user đạt được
+        const currentLevel = sortedLevels.find(l => points >= l.min);
+        
+        if (currentLevel) {
+            discountPercent = currentLevel.discount;
+            levelName = currentLevel.name;
+        }
+    }
+    // --------------------------------------------------------------------
+
     const discountAmount = subtotal * (discountPercent / 100);
     return {
       subtotal,
       discountPercent,
       discountAmount,
       total: subtotal - discountAmount,
+      levelName // Trả về tên level để hiển thị
     };
   };
 
-  const { subtotal, discountPercent, discountAmount, total } = calculateTotal();
+  const { subtotal, discountPercent, discountAmount, total, levelName } = calculateTotal();
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
-      <h2 className="text-2xl font-bold mb-6">Giỏ hàng</h2>
+      <h2 className="text-2xl font-bold mb-6">Giỏ sách của bạn</h2>
       {cart.length === 0 ? (
         <div className="text-center py-20 bg-white border rounded">
           <p className="mb-4 text-gray-500">Giỏ hàng trống</p>
           <div className="flex justify-center gap-4">
-            <Button onClick={() => navigate("/products")}>Mua sắm ngay</Button>
+            <Button onClick={() => navigate("/products")}>Đăng ký mua sách ngay</Button>
           </div>
         </div>
       ) : (
@@ -102,7 +119,7 @@ export default function Cart() {
                 />
                 <div className="flex-1">
                   <h3 className="font-semibold line-clamp-1">{item.name}</h3>
-                  <div className="text-blue-600">
+                  <div className="text-blue-600 font-bold">
                     {formatCurrency(item.price)}
                   </div>
                 </div>
@@ -130,25 +147,27 @@ export default function Cart() {
               </div>
             ))}
           </div>
-          <div className="bg-white p-6 border rounded h-fit">
-            <h3 className="font-bold mb-4">Thanh toán</h3>
-            <div className="space-y-2 mb-4 text-sm">
+          <div className="bg-white p-6 border rounded h-fit shadow-sm">
+            <h3 className="font-bold mb-4">Tổng quan đơn hàng</h3>
+            <div className="space-y-3 mb-4 text-sm">
               <div className="flex justify-between">
                 <span>Tạm tính:</span>
                 <span>{formatCurrency(subtotal)}</span>
               </div>
-              <div className="flex justify-between text-green-600">
-                {/* HIỂN THỊ THÊM % GIẢM GIÁ */}
-                <span>Giảm giá ({userInfo?.level || "BRONZE"} - {discountPercent}%):</span>
+              
+              {/* Hiển thị chi tiết giảm giá */}
+              <div className="flex justify-between text-green-600 bg-green-50 p-2 rounded">
+                <span>Ưu đãi {levelName} (-{discountPercent}%):</span>
                 <span>-{formatCurrency(discountAmount)}</span>
               </div>
-              <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                <span>Tổng:</span>
+              
+              <div className="flex justify-between font-bold text-xl pt-4 border-t text-red-600">
+                <span>Tổng cộng:</span>
                 <span>{formatCurrency(total)}</span>
               </div>
             </div>
-            <Button onClick={() => navigate("/checkout")} className="w-full">
-              Thanh toán
+            <Button onClick={() => navigate("/checkout")} className="w-full py-3 text-lg">
+              Tiến hành thanh toán
             </Button>
           </div>
         </div>

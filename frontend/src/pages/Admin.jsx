@@ -1,12 +1,45 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import {
-  LayoutDashboard, BookOpen, ShoppingCart, Users, Layers, Plus, Trash2, Save, X, Menu, UploadCloud, ChevronRight, Edit, User, Building2, Calendar, Star, BarChart2, Settings, MessageSquare, Mail, Loader2, CreditCard 
+  LayoutDashboard, BookOpen, ShoppingCart, Users, Layers, Plus, Trash2, Save, X, Menu, UploadCloud, ChevronRight, Edit, User, Building2, Calendar, Star, BarChart2, Settings, MessageSquare, Mail, Loader2, CreditCard, PieChart
 } from "lucide-react";
 import { useStore, actions } from "../store";
 import { Button, Card, Badge } from "../components/UI";
 import { formatCurrency } from "../utils";
 
+// --- SIMPLE CHART COMPONENT ---
+const SimpleBarChart = ({ data }) => {
+    const total = Object.values(data).reduce((a, b) => a + b, 0);
+    const getPercent = (val) => total === 0 ? 0 : Math.round((val / total) * 100);
+
+    const items = [
+        { label: "Chờ duyệt", value: data.pending, color: "bg-yellow-400", text: "text-yellow-700" },
+        { label: "Đang giao", value: data.shipping, color: "bg-blue-400", text: "text-blue-700" },
+        { label: "Thành công", value: data.completed, color: "bg-green-400", text: "text-green-700" },
+        { label: "Đã hủy", value: data.cancelled, color: "bg-red-400", text: "text-red-700" },
+        { label: "Trả hàng", value: data.returned, color: "bg-gray-400", text: "text-gray-700" },
+    ];
+
+    return (
+        <div className="space-y-4">
+            {items.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-4">
+                    <div className={`w-24 text-sm font-bold ${item.text}`}>{item.label}</div>
+                    <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden relative">
+                        <div 
+                            className={`h-full ${item.color} transition-all duration-1000`} 
+                            style={{ width: `${getPercent(item.value)}%` }}
+                        ></div>
+                    </div>
+                    <div className="w-12 text-right text-sm font-bold text-gray-600">{item.value}</div>
+                    <div className="w-12 text-right text-xs text-gray-400">({getPercent(item.value)}%)</div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// --- IMAGE UPLOADER ---
 const ImageUploader = ({ images = [], onImagesChange, domain }) => {
   const [uploading, setUploading] = useState(false);
   const onDrop = useCallback(
@@ -53,19 +86,7 @@ export default function Admin() {
   const [isEditingProd, setIsEditingProd] = useState(false);
   const [prodForm, setProdForm] = useState({ id: "", category_id: "", name: "", author: "", publisher: "", publication_year: "", price: 0, sale_price: "", stock: 0, images: [], description: "", specs: [] });
   const [catName, setCatName] = useState("");
-
-  // --- STATE TÍNH % GIẢM GIÁ ---
   const [salePercent, setSalePercent] = useState("");
-
-  // Tự động tính % khi mở form edit
-  useEffect(() => {
-      if (isEditingProd && prodForm.price > 0 && prodForm.sale_price > 0) {
-          const percent = Math.round(((prodForm.price - prodForm.sale_price) / prodForm.price) * 100);
-          setSalePercent(percent);
-      } else {
-          setSalePercent("");
-      }
-  }, [isEditingProd, prodForm.id]); // Chạy lại khi mở form hoặc đổi ID
 
   const fetchData = async (tab = activeTab) => {
     setLoading(true);
@@ -85,76 +106,34 @@ export default function Admin() {
 
   useEffect(() => { if (userInfo?.role === "admin") fetchData(); }, [activeTab, userInfo, domain]);
 
-  const handleAddCategory = async () => {
-    if (!catName) return alert("Nhập tên danh mục!");
-    setSubmitting(true);
-    try { const res = await fetch(`${domain}/api/admin/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: catName, description: "" }), credentials: "include" }); if (res.ok) { alert("Đã thêm!"); setCatName(""); fetchData(); } else alert("Lỗi thêm"); } catch (e) { alert("Lỗi server"); } finally { setSubmitting(false); }
-  };
+  const handleAddCategory = async () => { if (!catName) return alert("Nhập tên danh mục!"); setSubmitting(true); try { const res = await fetch(`${domain}/api/admin/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: catName, description: "" }), credentials: "include" }); if (res.ok) { alert("Đã thêm!"); setCatName(""); fetchData(); } else alert("Lỗi thêm"); } catch (e) { alert("Lỗi server"); } finally { setSubmitting(false); } };
   const handleDeleteCategory = async (id) => { if (!confirm("Xóa danh mục?")) return; setSubmitting(true); try { const res = await fetch(`${domain}/api/admin/categories/${id}`, { method: "DELETE", credentials: "include" }); if (res.ok) { alert("Đã xóa!"); fetchData(); } else { alert("Không thể xóa"); } } catch (e) { alert("Lỗi server"); } finally { setSubmitting(false); } };
 
   const saveProduct = async () => {
     if (!prodForm.name || !prodForm.category_id) return alert("Vui lòng nhập tên và chọn danh mục!");
     setSubmitting(true);
     const specsObject = prodForm.specs.reduce((acc, curr) => { if (curr.key) acc[curr.key] = curr.value; return acc; }, {});
-    const payload = {
-      ...prodForm,
-      price: Number(prodForm.price),
-      sale_price: prodForm.sale_price && Number(prodForm.sale_price) > 0 ? Number(prodForm.sale_price) : null,
-      stock: Number(prodForm.stock),
-      publication_year: Number(prodForm.publication_year),
-      specs: specsObject,
-    };
-    const method = prodForm.id ? "PUT" : "POST";
-    const url = prodForm.id ? `${domain}/api/admin/products/${prodForm.id}` : `${domain}/api/admin/products`;
+    const payload = { ...prodForm, price: Number(prodForm.price), sale_price: prodForm.sale_price && Number(prodForm.sale_price) > 0 ? Number(prodForm.sale_price) : null, stock: Number(prodForm.stock), publication_year: Number(prodForm.publication_year), specs: specsObject };
+    const method = prodForm.id ? "PUT" : "POST"; const url = prodForm.id ? `${domain}/api/admin/products/${prodForm.id}` : `${domain}/api/admin/products`;
     try { const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), credentials: "include" }); if (res.ok) { alert("Lưu thành công!"); setIsEditingProd(false); fetchData(); } else alert("Lỗi lưu sách"); } catch (e) { console.error(e); alert("Lỗi kết nối"); } finally { setSubmitting(false); }
   };
-
+  const handleDeleteProduct = async (id) => { if (!confirm("Xóa sách này?")) return; setSubmitting(true); try { await fetch(`${domain}/api/admin/products/${id}`, { method: "DELETE", credentials: "include" }); fetchData(); } catch(e) { console.error(e); } finally { setSubmitting(false); } };
   const openEditProduct = (p) => {
     if (p) {
-      const specs = p.specs ? Object.entries(p.specs).map(([key, value]) => ({ key, value })) : [];
-      setProdForm({ ...p, specs, images: Array.isArray(p.images) ? p.images : p.image ? [p.image] : [], author: p.author || "", publisher: p.publisher || "", publication_year: p.publication_year || "", sale_price: p.sale_price || "" });
-    } else {
-      setProdForm({ id: "", category_id: categories[0]?.id || "", name: "", author: "", publisher: "", publication_year: new Date().getFullYear(), price: 0, sale_price: "", stock: 0, images: [], description: "", specs: [] });
-      setSalePercent("");
-    }
+        const specs = p.specs ? Object.entries(p.specs).map(([key, value]) => ({ key, value })) : [];
+        setProdForm({ ...p, specs, images: Array.isArray(p.images) ? p.images : p.image ? [p.image] : [], author: p.author || "", publisher: p.publisher || "", publication_year: p.publication_year || "", sale_price: p.sale_price || "" });
+        if(p.price && p.sale_price) setSalePercent(Math.round(((p.price - p.sale_price)/p.price)*100)); else setSalePercent("");
+    } else { setProdForm({ id: "", category_id: categories[0]?.id || "", name: "", author: "", publisher: "", publication_year: new Date().getFullYear(), price: 0, sale_price: "", stock: 0, images: [], description: "", specs: [] }); setSalePercent(""); }
     setIsEditingProd(true);
   };
-  const handleDeleteProduct = async (id) => { if (!confirm("Xóa sách này?")) return; setSubmitting(true); try { await fetch(`${domain}/api/admin/products/${id}`, { method: "DELETE", credentials: "include" }); fetchData(); } catch(e) { console.error(e); } finally { setSubmitting(false); } };
+
+  const handlePriceChange = (e) => { const newPrice = Number(e.target.value); setProdForm({...prodForm, price: newPrice}); if (salePercent && newPrice > 0) { const sale = newPrice * (1 - salePercent/100); setProdForm(prev => ({...prev, price: newPrice, sale_price: sale.toFixed(0)})); } };
+  const handleSalePercentChange = (e) => { const percent = Number(e.target.value); setSalePercent(percent); if (prodForm.price > 0) { const sale = prodForm.price * (1 - percent/100); setProdForm({...prodForm, sale_price: sale.toFixed(0)}); } };
+  const handleSalePriceChange = (e) => { const sale = Number(e.target.value); setProdForm({...prodForm, sale_price: sale}); if (prodForm.price > 0 && sale > 0) { const percent = Math.round(((prodForm.price - sale) / prodForm.price) * 100); setSalePercent(percent); } else { setSalePercent(""); } };
 
   const updateOrderStatus = async (id, status) => { setSubmitting(true); try { await fetch(`${domain}/api/admin/orders/${id}/status`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }), credentials: "include" }); fetchData("orders"); } catch(e) { console.error(e); } finally { setSubmitting(false); } };
   const saveSettings = async (newSettingsObj) => { setSubmitting(true); const settingsArray = Object.entries(newSettingsObj).map(([id, value]) => ({ id, value })); try { await fetch(`${domain}/api/admin/settings`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ settings: settingsArray }), credentials: 'include' }); alert("Cập nhật thành công!"); } catch(e) { alert("Lỗi cập nhật"); } finally { setSubmitting(false); } };
-  const updateContactStatus = async (id, status) => { setSubmitting(true); try { await fetch(`${domain}/api/admin/contacts/${id}/status`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ status }), credentials: "include" }); fetchData("contacts"); } catch(e) { console.error(e); } finally { setSubmitting(false); } };
-
-  // --- HÀM TÍNH TOÁN GIÁ/PHẦN TRĂM ---
-  const handlePriceChange = (e) => {
-      const newPrice = Number(e.target.value);
-      setProdForm({...prodForm, price: newPrice});
-      // Nếu đang có %, tính lại sale_price
-      if (salePercent && newPrice > 0) {
-          const sale = newPrice * (1 - salePercent/100);
-          setProdForm(prev => ({...prev, price: newPrice, sale_price: sale.toFixed(0)}));
-      }
-  };
-
-  const handleSalePercentChange = (e) => {
-      const percent = Number(e.target.value);
-      setSalePercent(percent);
-      if (prodForm.price > 0) {
-          const sale = prodForm.price * (1 - percent/100);
-          setProdForm({...prodForm, sale_price: sale.toFixed(0)});
-      }
-  };
-
-  const handleSalePriceChange = (e) => {
-      const sale = Number(e.target.value);
-      setProdForm({...prodForm, sale_price: sale});
-      if (prodForm.price > 0 && sale > 0) {
-          const percent = Math.round(((prodForm.price - sale) / prodForm.price) * 100);
-          setSalePercent(percent);
-      } else {
-          setSalePercent("");
-      }
-  };
+  const updateContactStatus = async (id, status) => { setSubmitting(true); try { await fetch(`${domain}/api/admin/contacts/${id}/status`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ status }), credentials: 'include' }); fetchData("contacts"); } catch(e) { console.error(e); } finally { setSubmitting(false); } };
 
   if (userInfo?.role !== "admin") return <div className="p-10 text-center text-red-500 font-bold">⛔ Bạn không có quyền truy cập.</div>;
 
@@ -166,50 +145,26 @@ export default function Admin() {
           <div className="space-y-6 max-w-4xl animate-fade-in"><h2 className="text-2xl font-bold text-gray-800">Quản lý Danh mục</h2><Card className="p-6 flex gap-4 items-end"><div className="flex-1"><label className="block text-sm font-bold text-gray-700 mb-1">Tên danh mục mới</label><input className="border p-2 rounded w-full outline-none focus:border-emerald-500 disabled:bg-gray-100" placeholder="VD: Công nghệ thông tin..." value={catName} onChange={(e) => setCatName(e.target.value)} disabled={submitting} /></div><Button onClick={handleAddCategory} className="bg-emerald-600 text-white h-10 w-32" disabled={submitting}>{submitting ? <Loader2 className="animate-spin" size={20} /> : "Thêm mới"}</Button></Card><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{categories.map((c) => (<div key={c.id} className="bg-white p-4 rounded-lg shadow-sm border flex justify-between items-center"><span className="font-bold text-gray-700">{c.name}</span><button onClick={() => handleDeleteCategory(c.id)} className="text-red-500 hover:bg-red-50 p-2 rounded disabled:opacity-50" disabled={submitting}><Trash2 size={18} /></button></div>))}</div></div>
       );
       case "products": if (isEditingProd) return (
-            <div className="max-w-5xl mx-auto animate-fade-in">
-              <button onClick={() => setIsEditingProd(false)} className="mb-4 text-gray-500 hover:text-emerald-600 flex items-center gap-1 disabled:opacity-50" disabled={submitting}><ChevronRight className="rotate-180" size={20} /> Quay lại danh sách</button>
-              <Card className="p-6">
-                <h2 className="text-xl font-bold mb-6 border-b pb-2">{prodForm.id ? "Sửa thông tin sách" : "Thêm sách mới"}</h2>
-                <div className="grid md:grid-cols-3 gap-8">
-                  <div className="md:col-span-2 space-y-4">
-                    <div><label className="block text-sm font-bold mb-1">Tên giáo trình</label><input className="w-full border p-2 rounded" value={prodForm.name} onChange={(e) => setProdForm({ ...prodForm, name: e.target.value })} placeholder="VD: Giải tích 1" disabled={submitting} /></div>
-                    <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold mb-1">Tác giả</label><input className="w-full border p-2 rounded" value={prodForm.author} onChange={(e) => setProdForm({ ...prodForm, author: e.target.value })} disabled={submitting} /></div><div><label className="block text-sm font-bold mb-1">Nhà xuất bản</label><input className="w-full border p-2 rounded" value={prodForm.publisher} onChange={(e) => setProdForm({ ...prodForm, publisher: e.target.value })} disabled={submitting} /></div></div>
-                    <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold mb-1">Danh mục</label><select className="w-full border p-2 rounded" value={prodForm.category_id} onChange={(e) => setProdForm({ ...prodForm, category_id: e.target.value })} disabled={submitting}><option value="">-- Chọn danh mục --</option>{categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}</select></div><div><label className="block text-sm font-bold mb-1">Năm XB</label><input type="number" className="w-full border p-2 rounded" value={prodForm.publication_year} onChange={(e) => setProdForm({ ...prodForm, publication_year: e.target.value })} disabled={submitting} /></div></div>
-                    
-                    {/* KHU VỰC NHẬP GIÁ & % GIẢM GIÁ */}
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold mb-1">Giá bìa (VND)</label>
-                            <input type="number" className="w-full border p-2 rounded font-bold" value={prodForm.price} onChange={handlePriceChange} disabled={submitting} />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold mb-1 text-red-600">Giảm (%)</label>
-                            <input type="number" className="w-full border p-2 rounded text-red-600 bg-red-50 border-red-200" placeholder="%" value={salePercent} onChange={handleSalePercentChange} disabled={submitting} />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold mb-1 text-red-600">Giá sau KM</label>
-                            <input type="number" className="w-full border p-2 rounded font-bold text-red-600 bg-red-50 border-red-200" placeholder="0" value={prodForm.sale_price} onChange={handleSalePriceChange} disabled={submitting} />
-                        </div>
-                    </div>
-                    <div><label className="block text-sm font-bold mb-1">Số lượng kho</label><input type="number" className="w-full border p-2 rounded" value={prodForm.stock} onChange={(e) => setProdForm({ ...prodForm, stock: e.target.value })} disabled={submitting} /></div>
-
-                    <div><label className="block text-sm font-bold mb-1">Mô tả</label><textarea rows="4" className="w-full border p-2 rounded" value={prodForm.description} onChange={(e) => setProdForm({ ...prodForm, description: e.target.value })} disabled={submitting} /></div>
-                    <ImageUploader images={prodForm.images} onImagesChange={(imgs) => setProdForm({ ...prodForm, images: imgs })} domain={domain} />
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded h-fit border"><div className="flex justify-between items-center mb-2"><label className="font-bold">Thông tin khác</label><button onClick={() => setProdForm({ ...prodForm, specs: [...prodForm.specs, { key: "", value: "" }] })} className="text-emerald-600 text-sm font-bold flex items-center disabled:opacity-50" disabled={submitting}><Plus size={14} /> Thêm</button></div><div className="space-y-2">{prodForm.specs.map((s, i) => (<div key={i} className="flex gap-2 bg-white p-2 border rounded"><input className="w-1/2 text-xs border-b outline-none font-bold" placeholder="Tên" value={s.key} onChange={(e) => { const n = [...prodForm.specs]; n[i].key = e.target.value; setProdForm({ ...prodForm, specs: n }); }} disabled={submitting} /><input className="w-1/2 text-xs outline-none" placeholder="Giá trị" value={s.value} onChange={(e) => { const n = [...prodForm.specs]; n[i].value = e.target.value; setProdForm({ ...prodForm, specs: n }); }} disabled={submitting} /><button onClick={() => setProdForm({ ...prodForm, specs: prodForm.specs.filter((_, idx) => idx !== i) })} className="text-red-500 disabled:opacity-50" disabled={submitting}><Trash2 size={14} /></button></div>))}</div></div>
-                </div>
-                <div className="mt-6 flex justify-end gap-2 border-t pt-4"><Button variant="secondary" onClick={() => setIsEditingProd(false)} disabled={submitting}>Hủy</Button><Button onClick={saveProduct} className="bg-emerald-600 text-white min-w-[120px]" disabled={submitting}>{submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu sách"}</Button></div>
-              </Card>
-            </div>
+            <div className="max-w-5xl mx-auto animate-fade-in"><button onClick={() => setIsEditingProd(false)} className="mb-4 text-gray-500 hover:text-emerald-600 flex items-center gap-1 disabled:opacity-50" disabled={submitting}><ChevronRight className="rotate-180" size={20} /> Quay lại danh sách</button><Card className="p-6"><h2 className="text-xl font-bold mb-6 border-b pb-2">{prodForm.id ? "Sửa thông tin sách" : "Thêm sách mới"}</h2><div className="grid md:grid-cols-3 gap-8"><div className="md:col-span-2 space-y-4"><div><label className="block text-sm font-bold mb-1">Tên giáo trình</label><input className="w-full border p-2 rounded" value={prodForm.name} onChange={(e) => setProdForm({ ...prodForm, name: e.target.value })} placeholder="VD: Giải tích 1" disabled={submitting} /></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold mb-1">Tác giả</label><input className="w-full border p-2 rounded" value={prodForm.author} onChange={(e) => setProdForm({ ...prodForm, author: e.target.value })} disabled={submitting} /></div><div><label className="block text-sm font-bold mb-1">Nhà xuất bản</label><input className="w-full border p-2 rounded" value={prodForm.publisher} onChange={(e) => setProdForm({ ...prodForm, publisher: e.target.value })} disabled={submitting} /></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold mb-1">Danh mục</label><select className="w-full border p-2 rounded" value={prodForm.category_id} onChange={(e) => setProdForm({ ...prodForm, category_id: e.target.value })} disabled={submitting}><option value="">-- Chọn danh mục --</option>{categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}</select></div><div><label className="block text-sm font-bold mb-1">Năm XB</label><input type="number" className="w-full border p-2 rounded" value={prodForm.publication_year} onChange={(e) => setProdForm({ ...prodForm, publication_year: e.target.value })} disabled={submitting} /></div></div><div className="grid grid-cols-3 gap-4"><div><label className="block text-sm font-bold mb-1">Giá bìa (VND)</label><input type="number" className="w-full border p-2 rounded font-bold" value={prodForm.price} onChange={handlePriceChange} disabled={submitting} /></div><div><label className="block text-sm font-bold mb-1 text-red-600">Giảm (%)</label><input type="number" className="w-full border p-2 rounded text-red-600 bg-red-50 border-red-200" placeholder="%" value={salePercent} onChange={handleSalePercentChange} disabled={submitting} /></div><div><label className="block text-sm font-bold mb-1 text-red-600">Giá sau KM</label><input type="number" className="w-full border p-2 rounded font-bold text-red-600 bg-red-50 border-red-200" placeholder="0" value={prodForm.sale_price} onChange={handleSalePriceChange} disabled={submitting} /></div></div><div><label className="block text-sm font-bold mb-1">Số lượng kho</label><input type="number" className="w-full border p-2 rounded" value={prodForm.stock} onChange={(e) => setProdForm({ ...prodForm, stock: e.target.value })} disabled={submitting} /></div><div><label className="block text-sm font-bold mb-1">Mô tả</label><textarea rows="4" className="w-full border p-2 rounded" value={prodForm.description} onChange={(e) => setProdForm({ ...prodForm, description: e.target.value })} disabled={submitting} /></div><ImageUploader images={prodForm.images} onImagesChange={(imgs) => setProdForm({ ...prodForm, images: imgs })} domain={domain} /></div><div className="bg-gray-50 p-4 rounded h-fit border"><div className="flex justify-between items-center mb-2"><label className="font-bold">Thông tin khác</label><button onClick={() => setProdForm({ ...prodForm, specs: [...prodForm.specs, { key: "", value: "" }] })} className="text-emerald-600 text-sm font-bold flex items-center disabled:opacity-50" disabled={submitting}><Plus size={14} /> Thêm</button></div><div className="space-y-2">{prodForm.specs.map((s, i) => (<div key={i} className="flex gap-2 bg-white p-2 border rounded"><input className="w-1/2 text-xs border-b outline-none font-bold" placeholder="Tên" value={s.key} onChange={(e) => { const n = [...prodForm.specs]; n[i].key = e.target.value; setProdForm({ ...prodForm, specs: n }); }} disabled={submitting} /><input className="w-1/2 text-xs outline-none" placeholder="Giá trị" value={s.value} onChange={(e) => { const n = [...prodForm.specs]; n[i].value = e.target.value; setProdForm({ ...prodForm, specs: n }); }} disabled={submitting} /><button onClick={() => setProdForm({ ...prodForm, specs: prodForm.specs.filter((_, idx) => idx !== i) })} className="text-red-500 disabled:opacity-50" disabled={submitting}><Trash2 size={14} /></button></div>))}</div></div></div><div className="mt-6 flex justify-end gap-2 border-t pt-4"><Button variant="secondary" onClick={() => setIsEditingProd(false)} disabled={submitting}>Hủy</Button><Button onClick={saveProduct} className="bg-emerald-600 text-white min-w-[120px]" disabled={submitting}>{submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu sách"}</Button></div></Card></div>
         );
         return (
           <div className="space-y-6 animate-fade-in"><div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-gray-800">Kho sách giáo trình</h2><Button onClick={() => openEditProduct(null)} className="bg-emerald-600 text-white" disabled={submitting}><Plus size={18} className="mr-2" /> Nhập sách mới</Button></div><div className="bg-white rounded-xl shadow-sm border overflow-hidden"><table className="w-full text-sm text-left"><thead className="bg-gray-50 text-gray-700 uppercase font-bold"><tr><th className="p-4">Tên sách</th><th className="p-4">Tác giả</th><th className="p-4">Danh mục</th><th className="p-4">Giá</th><th className="p-4 text-center">Kho</th><th className="p-4 text-right">Hành động</th></tr></thead><tbody className="divide-y">{products.map((p) => (<tr key={p.id} className="hover:bg-gray-50"><td className="p-4 flex gap-3 items-center"><img src={p.image || p.images?.[0] ? `${domain}${p.image || p.images[0]}` : "https://via.placeholder.com/40"} className="w-10 h-14 object-cover border bg-gray-100" /><span className="font-bold">{p.name}</span></td><td className="p-4 text-gray-600">{p.author}</td><td className="p-4 text-gray-500">{categories.find((c) => c.id === p.category_id)?.name}</td><td className="p-4 font-bold text-emerald-700">{p.sale_price && Number(p.sale_price) > 0 ? (<div><div className="text-red-600">{formatCurrency(p.sale_price)}</div><div className="text-xs text-gray-400 line-through">{formatCurrency(p.price)}</div></div>) : formatCurrency(p.price)}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${p.stock > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{p.stock}</span></td><td className="p-4 text-right space-x-2"><button onClick={() => openEditProduct(p)} className="text-blue-600 bg-blue-50 p-2 rounded hover:bg-blue-100 disabled:opacity-50" disabled={submitting}><Edit size={16} /></button><button onClick={() => handleDeleteProduct(p.id)} className="text-red-600 bg-red-50 p-2 rounded hover:bg-red-100 disabled:opacity-50" disabled={submitting}><Trash2 size={16} /></button></td></tr>))}</tbody></table></div></div>
         );
-      // Các case khác giữ nguyên
-      case "orders": return (<div className="space-y-4 animate-fade-in"><h2 className="text-2xl font-bold">Đơn đặt sách</h2>{orders.map((o) => (<Card key={o.id} className="p-4 flex justify-between items-center"><div><div className="flex gap-2"><span className="font-bold">Đơn #{o.id}</span><span className="text-gray-400">({new Date(o.created_at).toLocaleDateString("vi-VN")})</span></div><div className="text-sm text-gray-500">Người nhận: {o.shipping_name || o.user_name || "Ẩn danh"}</div></div><div className="font-bold text-emerald-600">{formatCurrency(o.final_amount)}</div><div className="flex items-center gap-2"><Badge color={o.status === "completed" ? "green" : o.status === "shipping" ? "blue" : o.status === "cancelled" ? "red" : "yellow"}>{o.status}</Badge><select className="border rounded p-1 text-sm outline-none disabled:bg-gray-100" value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} disabled={submitting}><option value="pending">Chờ xử lý</option><option value="shipping">Đang giao</option><option value="completed">Đã nhận</option><option value="cancelled">Hủy đơn</option></select>{submitting && <Loader2 size={16} className="animate-spin text-gray-400"/>}</div></Card>))}</div>);
+      case "orders": return (<div className="space-y-4 animate-fade-in"><h2 className="text-2xl font-bold">Đơn đặt sách</h2>{orders.map((o) => (<Card key={o.id} className="p-4 flex justify-between items-center"><div><div className="flex gap-2"><span className="font-bold">Đơn #{o.id}</span><span className="text-gray-400">({new Date(o.created_at).toLocaleDateString("vi-VN")})</span></div><div className="text-sm text-gray-500">Người nhận: {o.shipping_name || o.user_name || "Ẩn danh"}</div></div><div className="font-bold text-emerald-600">{formatCurrency(o.final_amount)}</div><div className="flex items-center gap-2"><Badge color={o.status === "completed" ? "green" : o.status === "shipping" ? "blue" : o.status === "cancelled" ? "red" : o.status === "returned" ? "gray" : "yellow"}>{o.status}</Badge><select className="border rounded p-1 text-sm outline-none disabled:bg-gray-100" value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} disabled={submitting}><option value="pending">Chờ xử lý</option><option value="shipping">Đang giao</option><option value="completed">Đã nhận</option><option value="cancelled">Hủy đơn</option><option value="returned">Đã trả hàng</option></select>{submitting && <Loader2 size={16} className="animate-spin text-gray-400"/>}</div></Card>))}</div>);
       case "users": return (<div className="space-y-4 animate-fade-in"><h2 className="text-2xl font-bold">Sinh viên</h2><div className="bg-white rounded border overflow-x-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-50 uppercase"><tr><th className="p-4">Tên</th><th className="p-4">Email</th><th className="p-4">MSV</th><th className="p-4">Điểm</th><th className="p-4">Vai trò</th></tr></thead><tbody>{users.map((u) => (<tr key={u.id} className="border-t"><td className="p-4 flex items-center gap-2"><img src={u.picture} className="w-6 h-6 rounded-full"/>{u.name}</td><td className="p-4">{u.email}</td><td className="p-4">{u.student_id || "---"}</td><td className="p-4 font-bold">{u.points}</td><td className="p-4 text-xs uppercase font-bold text-gray-500">{u.role}</td></tr>))}</tbody></table></div></div>);
       case "loyalty": return (<div className="max-w-2xl space-y-6 animate-fade-in"><h2 className="text-2xl font-bold">Cấu hình Điểm thưởng</h2><div className="grid md:grid-cols-2 gap-6"><Card className="p-6"><h3 className="font-bold mb-4 flex gap-2 items-center"><Star size={16} className="text-yellow-500"/> Tỷ lệ đổi điểm</h3><div className="flex items-center gap-2"><span>1.000 VNĐ = </span><input className="border p-1 w-20 text-center font-bold rounded disabled:bg-gray-100" value={settings.point_ratio || ""} onChange={e => setSettings({...settings, point_ratio: e.target.value})} disabled={submitting}/><span>điểm</span></div></Card><Card className="p-6"><h3 className="font-bold mb-4">Các hạng thành viên</h3>{['Silver', 'Gold', 'Diamond'].map(l => (<div key={l} className="flex justify-between mb-2"><span>{l} Reader</span><input className="border p-1 w-24 text-right rounded disabled:bg-gray-100" placeholder="Điểm" value={settings[`level_${l.toLowerCase()}`] || ""} onChange={e => setSettings({...settings, [`level_${l.toLowerCase()}`]: e.target.value})} disabled={submitting}/></div>))}</Card></div><Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white min-w-[140px]" disabled={submitting}>{submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu cấu hình"}</Button></div>);
-      case "analytics": return (<div className="space-y-6 animate-fade-in"><h2 className="text-2xl font-bold">Thống kê hoạt động</h2>{analytics ? <div className="grid grid-cols-2 md:grid-cols-4 gap-4"><Card className="p-4 bg-emerald-50 border-emerald-100"><div className="text-gray-500 text-sm">Doanh thu tháng</div><div className="text-xl font-bold text-emerald-700">{formatCurrency(analytics.revenue_month)}</div></Card><Card className="p-4 bg-blue-50 border-blue-100"><div className="text-gray-500 text-sm">Đơn mới</div><div className="text-xl font-bold text-blue-700">{analytics.new_orders}</div></Card><Card className="p-4 bg-purple-50 border-purple-100"><div className="text-gray-500 text-sm">Sinh viên mới</div><div className="text-xl font-bold text-purple-700">{analytics.new_users}</div></Card><Card className="p-4 bg-orange-50 border-orange-100"><div className="text-gray-500 text-sm">Sách Top 1</div><div className="text-sm font-bold text-orange-700 line-clamp-2">{analytics.top_product}</div></Card></div> : <div className="p-10 text-center">Chưa có dữ liệu</div>}</div>);
+      case "analytics": if (!analytics) return <div className="p-10 text-center">Chưa có dữ liệu thống kê</div>; return (
+            <div className="space-y-6 animate-fade-in">
+                <h2 className="text-2xl font-bold">Thống kê hoạt động</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4"><Card className="p-4 bg-emerald-50 border-emerald-100"><div className="text-gray-500 text-sm">Doanh thu tháng</div><div className="text-xl font-bold text-emerald-700">{formatCurrency(analytics.revenue_month)}</div></Card><Card className="p-4 bg-blue-50 border-blue-100"><div className="text-gray-500 text-sm">Đơn mới</div><div className="text-xl font-bold text-blue-700">{analytics.new_orders}</div></Card><Card className="p-4 bg-purple-50 border-purple-100"><div className="text-gray-500 text-sm">Sinh viên mới</div><div className="text-xl font-bold text-purple-700">{analytics.new_users}</div></Card><Card className="p-4 bg-orange-50 border-orange-100"><div className="text-gray-500 text-sm">Sách Top 1</div><div className="text-sm font-bold text-orange-700 line-clamp-2">{analytics.top_product}</div></Card></div>
+                
+                {/* --- BIỂU ĐỒ TRẠNG THÁI ĐƠN HÀNG (MỚI) --- */}
+                <Card className="p-6 max-w-2xl">
+                    <h3 className="font-bold mb-4 flex items-center gap-2"><PieChart size={20} className="text-emerald-600"/> Tỉ lệ đơn hàng</h3>
+                    <SimpleBarChart data={analytics.stats} />
+                </Card>
+            </div>
+      );
       case "settings": return (<div className="max-w-2xl space-y-6 animate-fade-in"><h2 className="text-2xl font-bold">Cấu hình Hệ thống</h2><Card className="p-6"><h3 className="font-bold mb-4 flex items-center gap-2 text-emerald-700 border-b pb-2"><CreditCard size={18}/> Thông tin Ngân hàng (QR Code)</h3><div className="grid md:grid-cols-2 gap-4"><div><label className="block text-sm font-bold mb-1 text-gray-700">Mã ngân hàng (BIN)</label><input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: 970422 (MBBank)" value={settings.bank_bin || ""} onChange={e => setSettings({...settings, bank_bin: e.target.value})} disabled={submitting}/><span className="text-xs text-gray-400">Tra cứu BIN tại VietQR.io</span></div><div><label className="block text-sm font-bold mb-1 text-gray-700">Số tài khoản</label><input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: 123456789" value={settings.bank_number || ""} onChange={e => setSettings({...settings, bank_number: e.target.value})} disabled={submitting}/></div><div className="md:col-span-2"><label className="block text-sm font-bold mb-1 text-gray-700">Tên chủ tài khoản</label><input className="w-full border p-2 rounded disabled:bg-gray-100" placeholder="VD: NGUYEN VAN A" value={settings.bank_name || ""} onChange={e => setSettings({...settings, bank_name: e.target.value})} disabled={submitting}/></div></div></Card><Card className="p-6 space-y-4"><h3 className="font-bold mb-2 flex items-center gap-2 text-gray-700 border-b pb-2"><Settings size={18}/> Thông tin chung</h3><div><label className="block text-sm font-bold mb-1">Tên cổng thông tin</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.site_name || ""} onChange={e => setSettings({...settings, site_name: e.target.value})} disabled={submitting}/></div><div><label className="block text-sm font-bold mb-1">Email ban quản trị</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.contact_email || ""} onChange={e => setSettings({...settings, contact_email: e.target.value})} disabled={submitting}/></div><div><label className="block text-sm font-bold mb-1">Hotline thư viện</label><input className="w-full border p-2 rounded disabled:bg-gray-100" value={settings.hotline || ""} onChange={e => setSettings({...settings, hotline: e.target.value})} disabled={submitting}/></div></Card><div className="flex justify-end"><Button onClick={() => saveSettings(settings)} className="bg-emerald-600 text-white min-w-[140px]" disabled={submitting}>{submitting ? <><Loader2 className="animate-spin mr-2" size={18} /> Đang lưu...</> : "Lưu thay đổi"}</Button></div></div>);
       case "contacts": return (<div className="space-y-4 animate-fade-in"><h2 className="text-2xl font-bold">Hòm thư góp ý</h2>{contacts.map(c => (<Card key={c.id} className="p-4 flex gap-4"><div className="flex-1"><div className="font-bold text-gray-800 flex items-center gap-2"><Mail size={14}/> {c.email} <span className="text-xs font-normal text-gray-400">({new Date(c.created_at).toLocaleDateString()})</span></div><p className="bg-gray-50 p-3 mt-2 rounded italic text-gray-700">"{c.message}"</p></div><div className="flex flex-col gap-2 min-w-[120px]"><Badge color={c.status === "processed" ? "green" : "yellow"}>{c.status === "processed" ? "Đã trả lời" : "Chờ xử lý"}</Badge>{c.status === "new" && (<Button size="sm" onClick={() => updateContactStatus(c.id, "processed")} className="bg-emerald-600 text-white text-xs" disabled={submitting}>{submitting ? "Đang xử lý..." : "Đánh dấu xong"}</Button>)}<a href={`mailto:${c.email}`} className="text-xs text-blue-600 text-center hover:underline">Gửi mail trả lời</a></div></Card>))}{contacts.length === 0 && <div className="text-center text-gray-500 py-10 border border-dashed rounded bg-gray-50">Hòm thư trống</div>}</div>);
       default: return null;
