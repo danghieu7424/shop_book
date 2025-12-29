@@ -103,7 +103,7 @@ export default function Profile() {
              <div className="h-24 bg-gradient-to-r from-emerald-600 to-emerald-400"></div>
              <div className="px-6 pb-6 relative">
                  <div className="flex justify-center mt-[-48px]"><img src={userInfo.picture || "https://via.placeholder.com/100"} className="w-24 h-24 rounded-full border-4 border-white shadow-md object-cover bg-white" alt="avatar" /></div>
-                  <div className="mt-20 text-center"><h2 className="font-bold text-xl text-gray-800">{userInfo.name}</h2><div className="text-sm text-gray-500 mb-2">{userInfo.email}</div><Badge color="blue">{loyaltyInfo ? loyaltyInfo.currentLevelName : "Thành viên"} Reader</Badge></div>
+                  <div className="mt-7 text-center"><h2 className="font-bold text-xl text-gray-800">{userInfo.name}</h2><div className="text-sm text-gray-500 mb-2">{userInfo.email}</div><Badge color="blue">{loyaltyInfo ? loyaltyInfo.currentLevelName : "Thành viên"} Reader</Badge></div>
              </div>
              <div className="px-6 pb-6 pt-2 border-t space-y-3">
                  <div className="flex justify-between items-center mb-2"><h3 className="font-bold text-gray-700">Thông tin cá nhân</h3>{!isEditing && <button onClick={() => setIsEditing(true)} className="text-xs text-blue-600 hover:underline">Sửa đổi</button>}</div>
