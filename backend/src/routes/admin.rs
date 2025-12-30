@@ -54,8 +54,7 @@ impl<S> FromRequestParts<S> for AdminUser where S: Send + Sync, AppState: From<S
     }
 }
 
-// ... (Giữ nguyên các struct/hàm Categories, Products, Orders, Users, Settings cũ) ...
-// Để ngắn gọn, tôi chỉ hiển thị phần Analytics được cập nhật. Bạn giữ nguyên các phần khác.
+// ... (Các phần create_category, delete_category, products... giữ nguyên) ...
 
 #[derive(Deserialize)]
 struct CreateCategoryReq { name: String, description: Option<String> }
@@ -115,12 +114,10 @@ async fn update_order_status(State(state): State<AppState>, _: AdminUser, Path(i
     }
     if tx.commit().await.is_ok() { (StatusCode::OK, Json("Updated")).into_response() } else { (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response() }
 }
-
 async fn get_all_users(State(state): State<AppState>, _: AdminUser) -> impl IntoResponse {
     let users = sqlx::query_as::<_, crate::routes::auth::UserResponse>("SELECT id, email, name, picture, role, status, points, level, phone, address, student_id FROM users").fetch_all(&state.db).await;
     match users { Ok(data) => (StatusCode::OK, Json(data)).into_response(), Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json("Error")).into_response() }
 }
-
 #[derive(Debug, Serialize, Deserialize, FromRow)] pub struct SettingItem { pub id: String, pub value: Option<String> }
 #[derive(Debug, Deserialize)] pub struct UpdateSettingReq { pub settings: Vec<SettingItem> }
 async fn get_settings(State(state): State<AppState>, _: AdminUser) -> impl IntoResponse {
@@ -142,14 +139,13 @@ pub async fn get_payment_config(State(state): State<AppState>) -> impl IntoRespo
     (StatusCode::OK, Json(config_map)).into_response()
 }
 
-// --- ANALYTICS MỚI (Bao gồm chi tiết đơn hàng) ---
+// --- ANALYTICS MỚI (ĐÃ SỬA LỖI CAST TYPE) ---
 #[derive(Serialize)]
 struct AnalyticsData {
     revenue_month: f64,
     new_orders: i64,
     new_users: i64,
     top_product: String,
-    // Thêm các trường thống kê đơn
     stats: OrderStatusStats,
 }
 
@@ -166,30 +162,30 @@ async fn get_analytics(State(state): State<AppState>, _: AdminUser) -> impl Into
     let revenue: (Option<Decimal>,) = sqlx::query_as("SELECT SUM(final_amount) FROM orders WHERE status = 'completed'").fetch_one(&state.db).await.unwrap_or((None,));
     let orders_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM orders").fetch_one(&state.db).await.unwrap_or((0,));
     let users_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(&state.db).await.unwrap_or((0,));
-    
     let top_prod_result: Result<Option<(String,)>, _> = sqlx::query_as("SELECT p.name FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN orders o ON oi.order_id = o.id WHERE o.status = 'completed' GROUP BY p.id, p.name ORDER BY SUM(oi.quantity) DESC LIMIT 1").fetch_optional(&state.db).await;
     let top_prod = match top_prod_result { Ok(Some((name,))) => name, Ok(None) => "Chưa có dữ liệu".to_string(), Err(_) => "Lỗi".to_string() };
 
-    // Truy vấn thống kê từng trạng thái
+    // --- SỬA Ở ĐÂY: THÊM CAST(... AS SIGNED) ---
+    // MySQL SUM() trả về Decimal, cần ép kiểu về Signed Integer để khớp với i64 của Rust
     let stats: OrderStatusStats = sqlx::query_as(
         r#"SELECT 
-            COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending,
-            COALESCE(SUM(CASE WHEN status = 'shipping' THEN 1 ELSE 0 END), 0) as shipping,
-            COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
-            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) as cancelled,
-            COALESCE(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END), 0) as returned
+            CAST(COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS SIGNED) as pending,
+            CAST(COALESCE(SUM(CASE WHEN status = 'shipping' THEN 1 ELSE 0 END), 0) AS SIGNED) as shipping,
+            CAST(COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS SIGNED) as completed,
+            CAST(COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) AS SIGNED) as cancelled,
+            CAST(COALESCE(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END), 0) AS SIGNED) as returned
         FROM orders"#
     )
     .fetch_one(&state.db)
     .await
-    .unwrap_or_default();
+    .unwrap_or_default(); // Nếu lỗi thì trả về toàn 0 thay vì panic
 
     let data = AnalyticsData {
         revenue_month: revenue.0.unwrap_or(Decimal::ZERO).to_f64().unwrap_or(0.0),
         new_orders: orders_count.0,
         new_users: users_count.0,
         top_product: top_prod,
-        stats, // Gửi kèm stats
+        stats,
     };
 
     (StatusCode::OK, Json(data)).into_response()
